@@ -1,0 +1,58 @@
+version = 1
+revision = 3
+requires-python = ">=3.13"
+
+[[package]]
+name = "construct"
+version = "2.10.68"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/e0/b7/a4a032e94bcfdff481f2e6fecd472794d9da09f474a2185ed33b2c7cad64/construct-2.10.68.tar.gz", hash = "sha256:7b2a3fd8e5f597a5aa1d614c3bd516fa065db01704c72a1efaaeec6ef23d8b45", size = 57856, upload-time = "2022-02-21T23:09:15.1Z" }
+
+[[package]]
+name = "construct-typing"
+version = "0.5.6"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "construct" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/42/5f/89f8e4fc17ea96ef9af66aa4818e00c4fb84c289c4c6879df411d11f15a4/construct-typing-0.5.6.tar.gz", hash = "sha256:0dc501351cd6b308f15ec54e5fe7c0fbc07cc1530a1b77b4303062a0a93c1297", size = 22716, upload-time = "2023-05-09T11:05:50.106Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/3e/c5/d68c7b7e5e2875d199b49f86f9fda2b18a58ff0a835f608cb664bbc3a53e/construct_typing-0.5.6-py3-none-any.whl", hash = "sha256:39c948329e880564e33521cba497b21b07967c465b9c9037d6334e2cffa1ced9", size = 24098, upload-time = "2023-05-09T11:05:48.66Z" },
+]
+
+[[package]]
+name = "crsf-parser"
+version = "0.3.2"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "construct" },
+    { name = "construct-typing" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/c3/f2/8507ceb18fe8c231c30089df75356cb76a1e61b8bb7dbe5b41d7e274e662/crsf_parser-0.3.2.tar.gz", hash = "sha256:9879b35245cb4e93574f8a29c63680a88e79aef586adb780785ea490d440d8f3", size = 4659, upload-time = "2021-10-06T19:51:47.72Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/6a/0c/05d044506b814de2a2b8bb8f30ec51682ab633d388465529ddcc1a74f519/crsf_parser-0.3.2-py3-none-any.whl", hash = "sha256:d3b1551fa068d2fe9ebda7265959a27eda57f885c8dff48425b6133b4d0eb71e", size = 6303, upload-time = "2021-10-06T19:51:45.972Z" },
+]
+
+[[package]]
+name = "pc-controller"
+version = "0.1.0"
+source = { virtual = "." }
+dependencies = [
+    { name = "crsf-parser" },
+    { name = "pyserial" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "crsf-parser", specifier = ">=0.3.2" },
+    { name = "pyserial", specifier = ">=3.5" },
+]
+
+[[package]]
+name = "pyserial"
+version = "3.5"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/1e/7d/ae3f0a63f41e4d2f6cb66a5b57197850f919f59e558159a4dd3a818f5082/pyserial-3.5.tar.gz", hash = "sha256:3c77e014170dfffbd816e6ffc205e9842efb10be9f58ec16d3e8675b4925cddb", size = 159125, upload-time = "2020-11-23T03:59:15.045Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/07/bc/587a445451b253b285629263eb51c2d8e9bcea4fc97826266d186f96f558/pyserial-3.5-py2.py3-none-any.whl", hash = "sha256:c4451db6ba391ca6ca299fb3ec7bae67a5c55dde170964c7a14ceefec02f2cf0", size = 90585, upload-time = "2020-11-23T03:59:13.41Z" },
+]
