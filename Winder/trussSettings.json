@@ -1,0 +1,18 @@
+{
+  "outputFileName": "Cyclone Truss",
+  "trussParameters": {
+    "numChords": 3,
+    "chordSpacing": 25.4,
+    "chordLength": 1143.0
+  },
+  "windingParameters":{
+    "numNodes": 45,
+    "numLayers": 2,
+    "_comment": "Skip index indicates how many chords the winder should skip in the lock. This MUST be coprime with 'numChords'",
+    "skipIndex": 1
+  },
+  "lockParameters": {
+    "lockWindings": 2
+  },
+  "defaultFeedRate": 9000
+}

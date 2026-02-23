@@ -42,3 +42,5 @@ fp-info-cache
 
 # backup zips
 *.zip
+
+/.vs
