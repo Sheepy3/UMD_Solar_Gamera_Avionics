@@ -1,20 +1,34 @@
 import dearpygui.dearpygui as dpg
 import os
 
-# Front
+# Font Configuration
 def create_fonts():
+    """Create font registry and load fonts. Prefers Atkinson Hyperlegible for better legibility."""
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    # Recommended font for solar-exposed GUI: Atkinson Hyperlegible
+    atkinson_path = os.path.join(base_dir, "fonts", "Atkinson-Hyperlegible-Regular.ttf")
+    
+    # Fallback to system font if not provided in the repo
+    system_path = "C:/Windows/Fonts/arial.ttf"
+    
+    font_to_use = atkinson_path if os.path.exists(atkinson_path) else system_path
+    
+    if not os.path.exists(font_to_use):
+        print(f"Warning: Font not found at {font_to_use}. Using Dear PyGui default.")
+        return None
+
     with dpg.font_registry():
         fonts = {
-            "title": dpg.add_font("C:/Windows/Fonts/arial.ttf", 30),
-            "small": dpg.add_font("C:/Windows/Fonts/arial.ttf", 18),
-            "medium": dpg.add_font("C:/Windows/Fonts/arial.ttf", 24),
-            "large": dpg.add_font("C:/Windows/Fonts/arial.ttf", 40),
+            "title": dpg.add_font(font_to_use, 30),
+            "small": dpg.add_font(font_to_use, 18),
+            "medium": dpg.add_font(font_to_use, 24),
+            "large": dpg.add_font(font_to_use, 40),
         }
     return fonts
 
-
 def apply_font(item_tag, font):
-    dpg.bind_item_font(item_tag, font)
+    if font:
+        dpg.bind_item_font(item_tag, font)
 
 
 # Window theme
