@@ -16,21 +16,21 @@ public:
     void setThrottle(float throttle); // 0.0 to 1.0
     void stop();
 
-    float getRPM(uint8_t samples = 10);
+    float getRPM(uint8_t samples);
     void resetHallTimes();
     
 private:
-    uint8_t _pwmPin;
-    uint8_t _hallPin;
+    uint8_t pwmPin;
+    uint8_t hallPin;
     
     // Volatiles for Interrupt
-    volatile uint8_t _validHallSamples;
-    volatile uint32_t _hallTimes[BUFFER_SIZE];
-    volatile uint8_t _hallIndex;
-    volatile uint32_t _lastPulseTime;
+    volatile uint8_t numValidHallSamples;
+    volatile uint32_t hallTimes[BUFFER_SIZE];
+    volatile uint8_t hallIndex;
+    volatile uint32_t lastPulseTime;
 
-    float _throttle;
-    Servo _escServo;
+    float throttle;
+    Servo escServo;
 
     void updateHallTimes();
     static void isrWrapper();

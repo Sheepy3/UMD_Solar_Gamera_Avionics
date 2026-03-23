@@ -5,19 +5,19 @@ const uint32_t STOP_TIMEOUT_MICROS = 3000000UL;
 ArmController* ArmController::instance = nullptr;
 
 ArmController::ArmController(uint8_t pwmPin, uint8_t hallPin) 
-    : _pwmPin(pwmPin), _hallPin(hallPin), _validHallSamples(0), _hallIndex(0), _throttle(0) {}
+    : pwmPin(pwmPin), hallPin(hallPin), numValidHallSamples(0), hallIndex(0), throttle(0) {}
 
 void ArmController::setup() {
     resetHallTimes();
 
-    pinMode(_pwmPin, OUTPUT);
-    pinMode(_hallPin, INPUT_PULLUP);
+    pinMode(pwmPin, OUTPUT);
+    pinMode(hallPin, INPUT_PULLUP);
 
-    _escServo.attach(_pwmPin);
-    _escServo.write(0);
+    escServo.attach(pwmPin);
+    escServo.write(0);
 
     instance = this;
-    attachInterrupt(digitalPinToInterrupt(_hallPin), ArmController::isrWrapper, RISING);
+    attachInterrupt(digitalPinToInterrupt(hallPin), ArmController::isrWrapper, RISING);
 }
 
 void ArmController::isrWrapper() {
@@ -28,17 +28,17 @@ void ArmController::isrWrapper() {
 
 void ArmController::updateHallTimes() {
     uint32_t currentTime = micros();
-    _hallTimes[_hallIndex] = currentTime;
-    _hallIndex = (_hallIndex + 1) % BUFFER_SIZE;
-    if (_validHallSamples < BUFFER_SIZE) _validHallSamples++;
-    _lastPulseTime = currentTime;
+    hallTimes[hallIndex] = currentTime;
+    hallIndex = (hallIndex + 1) % BUFFER_SIZE;
+    if (numValidHallSamples < BUFFER_SIZE) numValidHallSamples++;
+    lastPulseTime = currentTime;
 }
 
 void ArmController::setThrottle(float throttle) {
-    _throttle = constrain(throttle, 0.0, 1.0);
+    throttle = constrain(throttle, 0.0, 1.0);
 
-    uint8_t pulseWidth = _throttle * 180;
-    _escServo.write(pulseWidth);
+    uint8_t pulseWidth = throttle * 180;
+    escServo.write(pulseWidth);
 }
 
 void ArmController::stop() {
@@ -49,9 +49,9 @@ float ArmController::getRPM(uint8_t samples) {
     uint32_t now = micros();
     
     noInterrupts();
-    uint32_t lastPulse = _lastPulseTime;
-    uint8_t validCount = _validHallSamples;
-    uint8_t currentIndex = _hallIndex;
+    uint32_t lastPulse = lastPulseTime;
+    uint8_t validCount = numValidHallSamples;
+    uint8_t currentIndex = hallIndex;
     interrupts();
 
     // Check if motor is stopped
@@ -67,8 +67,8 @@ float ArmController::getRPM(uint8_t samples) {
     uint8_t earliestIdx = (latestIdx - count + BUFFER_SIZE) % BUFFER_SIZE;
     
     noInterrupts();
-    uint32_t endTime = _hallTimes[latestIdx];
-    uint32_t startTime = _hallTimes[earliestIdx];
+    uint32_t endTime = hallTimes[latestIdx];
+    uint32_t startTime = hallTimes[earliestIdx];
     interrupts();
 
     uint32_t timeSpan = endTime - startTime;
@@ -81,10 +81,10 @@ float ArmController::getRPM(uint8_t samples) {
 void ArmController::resetHallTimes() {
     noInterrupts();
     for (uint8_t i = 0; i < BUFFER_SIZE; i++) {
-        _hallTimes[i] = 0;
+        hallTimes[i] = 0;
     }
-    _validHallSamples = 0;
-    _hallIndex = 0;
-    _lastPulseTime = 0;
+    numValidHallSamples = 0;
+    hallIndex = 0;
+    lastPulseTime = 0;
     interrupts();
 }
