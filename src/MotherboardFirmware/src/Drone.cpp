@@ -46,7 +46,7 @@ void Drone::setup()
     }, this);
 }
 
-void Drone::processIncommingFrame(Radio& source, uint8_t type, uint8_t* payload, uint8_t len){
+void Drone::processIncommingFrame(Radio& source, const uint8_t type, const uint8_t* payload, const uint8_t len){
     if (&source == &usbRadio) {
         lastUSBRecieveTimeMS = nowMS;
     }
@@ -123,7 +123,44 @@ void Drone::processIncommingFrame(Radio& source, uint8_t type, uint8_t* payload,
 }
 
 bool Drone::sendTelemetry() {
-    
+    uint16_t values[16] = {0};
+
+    const BitFlags flags{
+        .id         = 0b100,
+        .setArm     = false,
+        .setEStop   = false,
+        .resetEStop = false,
+        .getArm     = armed,
+        .getEStop   = EStopActive
+    };
+
+    values[0] = packBitFlags(flags);
+
+    values[1] = floatToChannel(armN.getRPM());
+    values[2] = floatToChannel(armE.getRPM());
+    values[3] = floatToChannel(armS.getRPM());
+    values[4] = floatToChannel(armW.getRPM());
+
+    values[5] = floatToChannel(armN.getThrottle());
+    values[6] = floatToChannel(armE.getThrottle());
+    values[7] = floatToChannel(armS.getThrottle());
+    values[8] = floatToChannel(armW.getThrottle());
+
+    values[9] = static_cast<uint16_t>((ESTOP_LOCKOUT_MS + EStopTriggerTimeMS - nowMS) / 100U);
+
+    uint32_t end = EStopTriggerTimeMS + ESTOP_LOCKOUT_MS;
+
+    values[9] = (nowMS < end) ? static_cast<uint16_t>(min((end - nowMS) / 100U, 2047U)) : 0;
+
+    values[14] = static_cast<uint16_t>((nowMS & 0x3FF800) >> 11);
+    values[15] = static_cast<uint16_t>(nowMS & 0x7FF);
+
+    uint8_t payload[22];
+
+    packRCChannels(values, payload);
+
+    usbRadio.send(DestType::GROUND_STATION, 0x16, payload, 22);
+    uartRadio.send(DestType::GROUND_STATION, 0x16, payload, 22);
 }
 
 void Drone::main()

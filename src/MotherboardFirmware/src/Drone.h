@@ -77,7 +77,7 @@ private:
     
     bool sendTelemetry();
 
-    void processIncommingFrame(Radio& source, uint8_t type, uint8_t* payload, uint8_t len);
+    void processIncommingFrame(Radio& source, const uint8_t type, const uint8_t* payload, const uint8_t len);
 };
 
 #endif

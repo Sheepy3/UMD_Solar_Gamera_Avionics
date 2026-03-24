@@ -32,6 +32,20 @@ inline BitFlags unpackBitFlags(uint16_t data) {
     };
 }
 
+inline uint16_t packBitFlags(BitFlags flags) {
+    uint16_t data = 0;
+
+    data |= (static_cast<uint16_t>(flags.id) & ID_MASK);
+
+    if (flags.setArm)     data |= SET_ARM;
+    if (flags.setEStop)   data |= SET_ESTOP;
+    if (flags.resetEStop) data |= RESET_ESTOP;
+    if (flags.getArm)     data |= GET_ARM;
+    if (flags.getEStop)   data |= GET_ESTOP;
+
+    return data;
+}
+
 inline void unpackRCChannels(const uint8_t *payload, uint16_t out16[16])
 {
     uint32_t bits = 0;
@@ -52,19 +66,46 @@ inline void unpackRCChannels(const uint8_t *payload, uint16_t out16[16])
     }
 }
 
-inline float channelToFloat(uint16_t data) {
-    uint16_t maskedValue = data & 0x07FF;
+inline void packRCChannels(const uint16_t *values, uint8_t payload[22])
+{
+    uint32_t bits = 0;
+    uint8_t bitcount = 0;
+    uint8_t byteIdx = 0;
+
+    for (uint8_t i = 0; i < 16; i++)
+    {
+        bits |= (uint32_t)(values[i] & 0x7FF) << bitcount;
+        bitcount += 11;
+
+        while (bitcount >= 8 && byteIdx < 22)
+        {
+            payload[byteIdx++] = (uint8_t)(bits & 0xFF);
+            bits >>= 8;
+            bitcount -= 8;
+        }
+    }
+}
+
+inline float channelToFloat(uint16_t value) {
+    uint16_t maskedValue = value & 0x07FF;
     
     return static_cast<float>(maskedValue) / 2047.0f;
 }
 
-inline uint16_t u16BEtoLE(const uint8_t *p) 
-{
+inline uint16_t floatToChannel(float value) {
+    if (value < 0.0f) value = 0.0f;
+    if (value > 1.0f) value = 1.0f;
+    
+    uint16_t intValue = static_cast<uint16_t>(value * 2047.0f + 0.5f);
+    
+    return intValue & 0x07FF;
+}
+
+inline uint16_t u16BEtoLE(const uint8_t *p){
     return (uint16_t(p[0]) << 8) | uint16_t(p[1]);
 }
 
-inline uint32_t u24BEtoLE(const uint8_t *p)
-{
+inline uint32_t u24BEtoLE(const uint8_t *p){
     return (uint32_t(p[0]) << 16) | (uint32_t(p[1]) << 8) | uint32_t(p[2]);
 }
 

@@ -34,6 +34,10 @@ void ArmController::updateHallTimes() {
     lastPulseTime = currentTime;
 }
 
+float ArmController::getThrottle(){
+    return throttle;
+}
+
 void ArmController::setThrottle(float setThrottle) {
     if (throttle <= 0.01 && setThrottle > 0.01) {
         lastZeroThrottleTimeMS = millis();
