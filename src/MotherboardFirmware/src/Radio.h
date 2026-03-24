@@ -3,6 +3,8 @@
 
 #include <Arduino.h>
 
+class Radio;
+
 typedef void (*Callback)(void* context, Radio& source, uint8_t type, uint8_t* payload, uint8_t len);
 
 enum RadioState { HUNTING, GET_LEN, GET_PAYLOAD };

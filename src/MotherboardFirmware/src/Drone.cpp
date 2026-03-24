@@ -82,7 +82,7 @@ void Drone::processIncommingFrame(Radio& source, const uint8_t type, const uint8
             }
             
             armed = flags.setArm;
-            
+
             if (EStopActive || !armed){
                 armN.stop();
                 armE.stop();
@@ -161,10 +161,14 @@ bool Drone::sendTelemetry() {
 
     packRCChannels(values, payload);
 
-    usbRadio.send(DestType::GROUND_STATION, 0x16, payload, 22);
-    uartRadio.send(DestType::GROUND_STATION, 0x16, payload, 22);
+    bool success = true;
+
+    success &= usbRadio.send(DestType::GROUND_STATION, 0x16, payload, 22);
+    success &= uartRadio.send(DestType::GROUND_STATION, 0x16, payload, 22);
 
     //TODO: send imu data
+
+    return success;
 }
 
 void Drone::main()
