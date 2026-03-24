@@ -74,6 +74,7 @@ void Drone::processIncommingFrame(Radio& source, const uint8_t type, const uint8
         case 0x001:
             if (flags.setEStop) {
                 triggerEStop();
+                break;
             }
 
             if (flags.resetEStop && nowMS - EStopTriggerTimeMS > ESTOP_LOCKOUT_MS){
@@ -81,7 +82,8 @@ void Drone::processIncommingFrame(Radio& source, const uint8_t type, const uint8
             }
             
             armed = flags.setArm;
-            if (!armed) {
+            
+            if (EStopActive || !armed){
                 armN.stop();
                 armE.stop();
                 armS.stop();
@@ -98,7 +100,7 @@ void Drone::processIncommingFrame(Radio& source, const uint8_t type, const uint8
         /*
         case 0x010:
             break;
-        case 0x100:
+        case 0x100: //No response
             break;
         */
         default:
@@ -152,8 +154,8 @@ bool Drone::sendTelemetry() {
 
     values[9] = (nowMS < end) ? static_cast<uint16_t>(min((end - nowMS) / 100U, 2047U)) : 0;
 
-    values[14] = static_cast<uint16_t>((nowMS & 0x3FF800) >> 11);
-    values[15] = static_cast<uint16_t>(nowMS & 0x7FF);
+    values[14] = static_cast<uint16_t>(nowMS & 0x7FF);
+    values[15] = static_cast<uint16_t>((nowMS >> 11) & 0x7FF);
 
     uint8_t payload[22];
 
@@ -161,6 +163,8 @@ bool Drone::sendTelemetry() {
 
     usbRadio.send(DestType::GROUND_STATION, 0x16, payload, 22);
     uartRadio.send(DestType::GROUND_STATION, 0x16, payload, 22);
+
+    //TODO: send imu data
 }
 
 void Drone::main()
