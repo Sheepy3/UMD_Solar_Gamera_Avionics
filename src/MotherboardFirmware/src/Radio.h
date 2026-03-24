@@ -3,18 +3,22 @@
 
 #include <Arduino.h>
 
-typedef void (*Callback)(Radio& source, uint8_t type, uint8_t* payload, uint8_t len);
+typedef void (*Callback)(void* context, Radio& source, uint8_t type, uint8_t* payload, uint8_t len);
+
 enum RadioState { HUNTING, GET_LEN, GET_PAYLOAD };
 
 class Radio {
 public:
     Radio(Stream& s);
     void setCallback(Callback cb);
+    void setCallback(Callback cb, void* ctx);
     void update();
     bool send(const uint8_t targetSync, const uint8_t type, const uint8_t* payload, size_t payloadLen);
+
 private:
     Stream& serial;
-    Callback onPacket = nullptr;
+    Callback onPacket;
+    void* context;
     RadioState state = HUNTING;
 
     uint8_t buffer[64];

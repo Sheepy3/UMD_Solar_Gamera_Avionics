@@ -6,20 +6,24 @@
 
 class ArmController {
 public:
-    static const uint8_t COUNTS_PER_REVOLUTION = 4;
-    static const uint8_t BUFFER_MULT = 4;
-    static const uint8_t BUFFER_SIZE = BUFFER_MULT * COUNTS_PER_REVOLUTION;
-
     ArmController(uint8_t pwmPin, uint8_t hallPin);
 
     void setup();
-    void setThrottle(float throttle); // 0.0 to 1.0
+    void setThrottle(float setThrottle); // 0.0 to 1.0
     void stop();
 
     float getRPM(uint8_t samples);
+    bool isStalled();
+
     void resetHallTimes();
     
 private:
+    static const uint8_t COUNTS_PER_REVOLUTION = 4;
+    static const uint8_t BUFFER_MULT = 4;
+    static const uint8_t BUFFER_SIZE = BUFFER_MULT * COUNTS_PER_REVOLUTION;
+    static const uint32_t STOP_TIMEOUT_MICROS = 3000000UL;
+    static const uint32_t STALL_TIMEOUT_MICROS = 1000000UL;
+
     uint8_t pwmPin;
     uint8_t hallPin;
     
@@ -30,6 +34,7 @@ private:
     volatile uint32_t lastPulseTime;
 
     float throttle;
+    uint32_t lastZeroThrottleTimeMS;
     Servo escServo;
 
     void updateHallTimes();

@@ -1,6 +1,6 @@
 #include "ArmController.h"
 
-const uint32_t STOP_TIMEOUT_MICROS = 3000000UL;
+
 
 ArmController* ArmController::instance = nullptr;
 
@@ -34,11 +34,16 @@ void ArmController::updateHallTimes() {
     lastPulseTime = currentTime;
 }
 
-void ArmController::setThrottle(float throttle) {
-    throttle = constrain(throttle, 0.0, 1.0);
+void ArmController::setThrottle(float setThrottle) {
+    if (throttle <= 0.01 && setThrottle > 0.01) {
+        lastZeroThrottleTimeMS = millis();
+    }
 
-    uint8_t pulseWidth = throttle * 180;
-    escServo.write(pulseWidth);
+    setThrottle = constrain(setThrottle, 0.0, 1.0);
+    throttle = setThrottle;
+
+    uint8_t servoSetting = setThrottle * 180;
+    escServo.write(servoSetting);
 }
 
 void ArmController::stop() {
@@ -76,6 +81,28 @@ float ArmController::getRPM(uint8_t samples) {
 
     float rpm = (float)count * 6.0E7F / (float)timeSpan / COUNTS_PER_REVOLUTION;
     return rpm;
+}
+
+bool ArmController::isStalled() {
+    if (throttle < 0.10f) {
+        return false;
+    }
+
+    if (millis() - lastZeroThrottleTimeMS < 200) {
+        return false;
+    }
+
+    noInterrupts();
+    uint32_t last = lastPulseTime;
+    interrupts();
+
+    uint32_t now = micros();
+
+    if (now - last > STALL_TIMEOUT_MICROS) {
+        return true;
+    }
+
+    return false;
 }
 
 void ArmController::resetHallTimes() {

@@ -2,9 +2,9 @@
 
 Radio::Radio(Stream &s) : serial(s) {}
 
-void Radio::setCallback(Callback cb)
-{
+void Radio::setCallback(Callback cb, void* ctx) { 
     onPacket = cb;
+    context = ctx;
 }
 
 void Radio::update()
@@ -41,9 +41,9 @@ void Radio::update()
                 const uint8_t computedCRC = crc8_d5(buffer, payloadIndex - 1);
 
                 if (recievedCRC == computedCRC && onPacket != nullptr){
-                    onPacket(*this, buffer[0], &buffer[1], expectedLength - 2);
+                    onPacket(context, *this, buffer[0], &buffer[1], expectedLength - 2);
                 }
-                
+
                 state = HUNTING;
             }
 
@@ -92,8 +92,8 @@ bool Radio::send(const uint8_t targetSync, const uint8_t type, const uint8_t* pa
 
     uint8_t crc = crc8_d5(&sendBuffer[2], payloadLen + 1);
 
-    buffer[3 + payloadLen] = crc;
+    sendBuffer[3 + payloadLen] = crc;
 
-    serial.write(buffer, totalFrameLen);
+    serial.write(sendBuffer, totalFrameLen);
     return true;
 }

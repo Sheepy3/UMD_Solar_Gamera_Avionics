@@ -4,6 +4,23 @@
 #include <Arduino.h>
 #include "ArmController.h"
 #include "Radio.h"
+#include "util.h"
+
+// CRSF Address definitions
+enum DestType : uint8_t {
+    REMOTE_CONTROL = 0xEA,
+    TRANSMITTER = 0xEE,
+    GROUND_STATION = 0xC8,
+    GPS = 0xC2 //Unused
+};
+
+// CRSF Protocol Constants
+enum PayloadType : uint8_t {
+    RC_CHANNELS_PACKED = 0x16,
+    BATTERY_SENSOR = 0x08,
+    ALTITUDE = 0x1E,
+    LINK_STATISTICS = 0x14
+};
 
 struct DroneParams{
     int armNPWMPin;
@@ -39,22 +56,28 @@ public:
 
     void setup();
     void main();
-
+    void triggerEStop();
+    
 private:
+    uint32_t nowMS;
+
     bool armed;
     bool EStopActive;
-    uint32_t EStopTriggerTimeMS = 0;
-    uint32_t EStopResetTimeMS;
+    uint32_t EStopTriggerTimeMS;
 
-    uint32_t lastRadioRecieveTimeMS = 0;
     uint32_t lastUSBRecieveTimeMS = 0;
+    uint32_t lastUARTRecieveTimeMS = 0;
+    
+    static const uint8_t TELEMETRY_FREQUENCY = 10;
+    static const uint32_t TELEMETRY_DELAY = 1000L / TELEMETRY_FREQUENCY;
+    static const uint32_t TIMEOUT_MS = 1000L;
+    static const uint32_t ESTOP_LOCKOUT_MS = 10000L;
 
     uint32_t lastSentTelemetry = 0;
     
     bool sendTelemetry();
 
-    void processIncommingFrame(Radio source, uint8_t type, uint8_t* payload, uint8_t len);
+    void processIncommingFrame(Radio& source, uint8_t type, uint8_t* payload, uint8_t len);
 };
-
 
 #endif
