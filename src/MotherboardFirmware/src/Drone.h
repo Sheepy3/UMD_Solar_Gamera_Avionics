@@ -2,6 +2,7 @@
 #define DRONE_H
 
 #include <Arduino.h>
+#include <Adafruit_BNO08x.h>
 #include "ArmController.h"
 #include "Radio.h"
 #include "util.h"

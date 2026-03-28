@@ -71,15 +71,11 @@ uint8_t Radio::crc8_d5(const uint8_t *data, size_t len)
     return crc;
 }
 
-bool Radio::send(const uint8_t targetSync, const uint8_t type, const uint8_t* payload, size_t payloadLen){
-    if (payloadLen > 60) return false;
+void Radio::send(const uint8_t targetSync, const uint8_t type, const uint8_t* payload, size_t payloadLen){
+    if (payloadLen > 60) return;
 
     const uint8_t crsfFrameByte = payloadLen + 2;
     const uint8_t totalFrameLen = payloadLen + 4;
-
-    if (serial.availableForWrite() < totalFrameLen){
-        return false;
-    }
 
     uint8_t sendBuffer[64]; 
     sendBuffer[0] = targetSync;
@@ -95,5 +91,4 @@ bool Radio::send(const uint8_t targetSync, const uint8_t type, const uint8_t* pa
     sendBuffer[3 + payloadLen] = crc;
 
     serial.write(sendBuffer, totalFrameLen);
-    return true;
 }

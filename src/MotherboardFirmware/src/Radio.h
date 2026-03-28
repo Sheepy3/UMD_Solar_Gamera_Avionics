@@ -15,7 +15,7 @@ public:
     void setCallback(Callback cb);
     void setCallback(Callback cb, void* ctx);
     void update();
-    bool send(const uint8_t targetSync, const uint8_t type, const uint8_t* payload, size_t payloadLen);
+    void send(const uint8_t targetSync, const uint8_t type, const uint8_t* payload, size_t payloadLen);
 
 private:
     Stream& serial;

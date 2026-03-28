@@ -10,7 +10,7 @@ public:
 
     void setup();
     float getThrottle();
-    void setThrottle(float setThrottle); // 0.0 to 1.0
+    void setThrottle(float inputThrottle); // 0.0 to 1.0
     void stop();
 
     float getRPM(uint8_t samples = COUNTS_PER_REVOLUTION);
@@ -21,9 +21,9 @@ public:
 private:
     static const uint8_t COUNTS_PER_REVOLUTION = 4;
     static const uint8_t BUFFER_MULT = 2;
-    static const uint8_t BUFFER_SIZE = BUFFER_MULT * COUNTS_PER_REVOLUTION;
-    static const uint32_t STOP_TIMEOUT_MICROS = 3000000UL;
-    static const uint32_t STALL_TIMEOUT_MICROS = 1000000UL;
+    static const uint8_t BUFFER_SIZE = BUFFER_MULT * COUNTS_PER_REVOLUTION + 1;
+    static const uint32_t STOP_TIMEOUT_MS = 3000UL;
+    static const uint32_t STALL_TIMEOUT_MS = 3000UL;
 
     uint8_t pwmPin;
     uint8_t hallPin;
