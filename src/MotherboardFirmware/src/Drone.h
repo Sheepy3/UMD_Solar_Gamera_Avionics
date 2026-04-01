@@ -76,7 +76,7 @@ private:
 
     uint32_t lastSentTelemetry = 0;
     
-    bool sendTelemetry();
+    void sendTelemetry();
 
     void processIncommingFrame(Radio& source, const uint8_t type, const uint8_t* payload, const uint8_t len);
 };

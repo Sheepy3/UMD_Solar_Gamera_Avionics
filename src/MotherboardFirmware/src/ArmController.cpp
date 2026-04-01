@@ -53,7 +53,7 @@ void ArmController::stop() {
     setThrottle(0.0);
 }
 
-float ArmController::getRPM(uint8_t samples = COUNTS_PER_REVOLUTION) {
+float ArmController::getRPM(uint8_t samples) {
     uint32_t now = millis();
     
     noInterrupts();
