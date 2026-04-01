@@ -124,7 +124,7 @@ void Drone::processIncommingFrame(Radio& source, const uint8_t type, const uint8
     }
 }
 
-bool Drone::sendTelemetry() {
+void Drone::sendTelemetry() {
     uint16_t values[16] = {0};
 
     const BitFlags flags{
@@ -161,14 +161,10 @@ bool Drone::sendTelemetry() {
 
     packRCChannels(values, payload);
 
-    bool success = true;
-
-    success &= usbRadio.send(DestType::GROUND_STATION, 0x16, payload, 22);
-    success &= uartRadio.send(DestType::GROUND_STATION, 0x16, payload, 22);
+    usbRadio.send(DestType::GROUND_STATION, 0x16, payload, 22);
+    uartRadio.send(DestType::GROUND_STATION, 0x16, payload, 22);
 
     //TODO: send imu data
-
-    return success;
 }
 
 void Drone::main()
