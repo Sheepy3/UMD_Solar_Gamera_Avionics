@@ -73,7 +73,7 @@ def main():
 
     with dpg.texture_registry():
         # Better to use an English-only path if possible
-        image_path = "D:/image.png"
+        image_path = "horse.png"
         my_texture = load_texture(image_path)
 
     with dpg.window(tag="main_window"):
