@@ -7,6 +7,10 @@
 #include "Radio.h"
 #include "util.h"
 
+// true:  [DEBUG] CRSF_CHANNELS [132, 0, ...]
+// false: [DEBUG] armed=false estop=true ...
+static constexpr bool DEBUG_RAW_CRSF_CHANNELS = false;
+
 // CRSF Address definitions
 enum DestType : uint8_t {
     REMOTE_CONTROL = 0xEA,
@@ -60,11 +64,13 @@ public:
     void triggerEStop();
     
 private:
-    uint32_t nowMS;
+    SerialUSB& debugSerial;
 
-    bool armed;
-    bool EStopActive;
-    uint32_t EStopTriggerTimeMS;
+    uint32_t nowMS = 0;
+
+    bool armed = false;
+    bool EStopActive = false;
+    uint32_t EStopTriggerTimeMS = 0;
 
     uint32_t lastUSBRecieveTimeMS = 0;
     uint32_t lastUARTRecieveTimeMS = 0;
@@ -77,6 +83,7 @@ private:
     uint32_t lastSentTelemetry = 0;
     
     void sendTelemetry();
+    void printDebugTelemetry(const uint16_t values[16]);
 
     void processIncommingFrame(Radio& source, const uint8_t type, const uint8_t* payload, const uint8_t len);
 };

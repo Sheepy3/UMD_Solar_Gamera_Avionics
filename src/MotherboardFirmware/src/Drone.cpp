@@ -20,7 +20,8 @@ Drone::Drone(DroneParams& params) : armN(params.armNPWMPin, params.armNHallPin),
                                    armS(params.armSPWMPin, params.armSHallPin),
                                    armW(params.armWPWMPin, params.armWHallPin),
                                    usbRadio(params.serialParam),
-                                   uartRadio(params.radioParam)
+                                   uartRadio(params.radioParam),
+                                   debugSerial(params.serialParam)
 {
     params.radioParam.setTX(params.txPin);
     params.radioParam.setRX(params.rxPin);
@@ -161,10 +162,52 @@ void Drone::sendTelemetry() {
 
     packRCChannels(values, payload);
 
-    usbRadio.send(DestType::GROUND_STATION, 0x16, payload, 22);
+    printDebugTelemetry(values);
     uartRadio.send(DestType::GROUND_STATION, 0x16, payload, 22);
 
     //TODO: send imu data
+}
+
+void Drone::printDebugTelemetry(const uint16_t values[16]) {
+    if (DEBUG_RAW_CRSF_CHANNELS) {
+        debugSerial.print("[DEBUG] CRSF_CHANNELS [");
+
+        for (uint8_t i = 0; i < 16; ++i) {
+            if (i > 0) {
+                debugSerial.print(", ");
+            }
+            debugSerial.print(values[i]);
+        }
+
+        debugSerial.println("]");
+        return;
+    }
+
+    const BitFlags flags = unpackBitFlags(values[0]);
+    const uint32_t uptimeMS =
+        (static_cast<uint32_t>(values[15]) << 11) | values[14];
+
+    debugSerial.print("[DEBUG] armed=");
+    debugSerial.print(flags.getArm ? "true" : "false");
+    debugSerial.print(" estop=");
+    debugSerial.print(flags.getEStop ? "true" : "false");
+    debugSerial.print(" lockout_ms=");
+    debugSerial.print(static_cast<uint32_t>(values[9]) * 100U);
+
+    debugSerial.print(" rpm=[");
+    for (uint8_t i = 1; i <= 4; ++i) {
+        if (i > 1) debugSerial.print(",");
+        debugSerial.print(values[i]);
+    }
+
+    debugSerial.print("] throttle=[");
+    for (uint8_t i = 5; i <= 8; ++i) {
+        if (i > 5) debugSerial.print(",");
+        debugSerial.print(values[i]);
+    }
+
+    debugSerial.print("] uptime_ms=");
+    debugSerial.println(uptimeMS);
 }
 
 void Drone::main()
@@ -173,6 +216,7 @@ void Drone::main()
         nowMS = millis();
 
         if (nowMS - lastSentTelemetry > TELEMETRY_DELAY) {
+            lastSentTelemetry = nowMS;
             sendTelemetry();
         }
         
