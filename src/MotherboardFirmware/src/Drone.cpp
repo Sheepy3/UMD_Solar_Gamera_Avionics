@@ -14,6 +14,51 @@ void main();
 */
 
 static const uint32_t CRSF_BAUD = 460800;
+static const uint16_t CLARA_FLAG_A = 172;
+static const uint16_t CLARA_FLAG_B = 992;
+static const uint16_t CLARA_FLAG_C = 1811;
+static const uint16_t CLARA_FLAG_TOLERANCE = 50;
+
+static bool channelNear(uint16_t value, uint16_t target) {
+    return (value > target) ? (value - target <= CLARA_FLAG_TOLERANCE) : (target - value <= CLARA_FLAG_TOLERANCE);
+}
+
+static BitFlags decodeControlFlags(uint16_t channelValue) {
+    if (channelNear(channelValue, CLARA_FLAG_A)) {
+        return BitFlags{
+            .id = 0x001,
+            .setArm = true,
+            .setEStop = false,
+            .resetEStop = false,
+            .getArm = false,
+            .getEStop = false
+        };
+    }
+
+    if (channelNear(channelValue, CLARA_FLAG_B)) {
+        return BitFlags{
+            .id = 0x001,
+            .setArm = false,
+            .setEStop = true,
+            .resetEStop = false,
+            .getArm = false,
+            .getEStop = false
+        };
+    }
+
+    if (channelNear(channelValue, CLARA_FLAG_C)) {
+        return BitFlags{
+            .id = 0x001,
+            .setArm = false,
+            .setEStop = false,
+            .resetEStop = true,
+            .getArm = false,
+            .getEStop = false
+        };
+    }
+
+    return unpackBitFlags(channelValue);
+}
 
 Drone::Drone(DroneParams& params) : armN(params.armNPWMPin, params.armNHallPin),
                                    armE(params.armEPWMPin, params.armEHallPin),
@@ -48,13 +93,21 @@ void Drone::setup()
 }
 
 void Drone::processIncommingFrame(Radio& source, const uint8_t type, const uint8_t* payload, const uint8_t len){
+    const char* sourceName = "unknown";
+    uint32_t sourceDtMS = 0;
+
     if (&source == &usbRadio) {
+        sourceName = "usb";
+        sourceDtMS = (lastUSBRecieveTimeMS == 0) ? 0 : nowMS - lastUSBRecieveTimeMS;
         lastUSBRecieveTimeMS = nowMS;
     }
     else if (&source == &uartRadio) {
+        sourceName = "uart";
+        sourceDtMS = (lastUARTRecieveTimeMS == 0) ? 0 : nowMS - lastUARTRecieveTimeMS;
         lastUARTRecieveTimeMS = nowMS;
 
         if (nowMS - lastUSBRecieveTimeMS < TIMEOUT_MS){
+            printIncomingCRSF(sourceName, sourceDtMS, type, payload, len, nullptr, true);
             return;
         }
     }
@@ -69,12 +122,13 @@ void Drone::processIncommingFrame(Radio& source, const uint8_t type, const uint8
 
         unpackRCChannels(payload, channels);
 
-        BitFlags flags = unpackBitFlags(channels[0]);
+        BitFlags flags = decodeControlFlags(channels[0]);
+        printIncomingCRSF(sourceName, sourceDtMS, type, payload, len, channels, false);
 
         switch (flags.id){
         case 0x001:
             if (flags.setEStop) {
-                triggerEStop();
+                triggerEStop("command");
                 break;
             }
 
@@ -82,7 +136,7 @@ void Drone::processIncommingFrame(Radio& source, const uint8_t type, const uint8
                 EStopActive = false;
             }
             
-            armed = flags.setArm;
+            armed = !EStopActive && flags.setArm;
 
             if (EStopActive || !armed){
                 armN.stop();
@@ -121,6 +175,7 @@ void Drone::processIncommingFrame(Radio& source, const uint8_t type, const uint8
         break;
     */
     default:
+        printIncomingCRSF(sourceName, sourceDtMS, type, payload, len, nullptr, false);
         break;
     }
 }
@@ -224,21 +279,109 @@ void Drone::main()
         uartRadio.update();
 
         if (nowMS - lastUSBRecieveTimeMS > TIMEOUT_MS && nowMS - lastUARTRecieveTimeMS > TIMEOUT_MS){
-            triggerEStop();
+            triggerEStop("timeout");
         }
 
         if (armN.isStalled() || armE.isStalled() || armS.isStalled() || armW.isStalled()){
-            triggerEStop();
+            triggerEStop("stall");
         }
     }
 }
 
-void Drone::triggerEStop(){
+void Drone::triggerEStop(const char* reason){
     EStopActive = true;
+    armed = false;
     EStopTriggerTimeMS = nowMS;
+    printEStopReason(reason);
 
     armN.stop();
     armE.stop();
     armS.stop();
     armW.stop();
+}
+
+void Drone::printEStopReason(const char* reason) {
+    const bool reasonChanged = lastEStopReason != reason;
+
+    if (!reasonChanged && nowMS - lastEStopLogTimeMS < 500UL) {
+        return;
+    }
+
+    lastEStopReason = reason;
+    lastEStopLogTimeMS = nowMS;
+
+    debugSerial.print("[ESTOP] reason=");
+    debugSerial.print(reason);
+    debugSerial.print(" uptime_ms=");
+    debugSerial.print(nowMS);
+    debugSerial.print(" usb_age_ms=");
+    debugSerial.print(nowMS - lastUSBRecieveTimeMS);
+    debugSerial.print(" uart_age_ms=");
+    debugSerial.print(nowMS - lastUARTRecieveTimeMS);
+    debugSerial.print(" armed=");
+    debugSerial.println(armed ? "true" : "false");
+}
+
+void Drone::printIncomingCRSF(const char* sourceName, const uint32_t sourceDtMS, const uint8_t type, const uint8_t* payload, const uint8_t len, const uint16_t* channels, bool ignored) {
+    if (!DEBUG_INCOMING_CRSF) {
+        return;
+    }
+
+    if (nowMS - lastIncomingCRSFLogTimeMS < 100UL) {
+        return;
+    }
+
+    lastIncomingCRSFLogTimeMS = nowMS;
+
+    debugSerial.print("[RX] source=");
+    debugSerial.print(sourceName);
+    debugSerial.print(" type=0x");
+    printHexByte(type);
+    debugSerial.print(" len=");
+    debugSerial.print(len);
+    debugSerial.print(" source_dt_ms=");
+    debugSerial.print(sourceDtMS);
+    debugSerial.print(" ignored=");
+    debugSerial.print(ignored ? "true" : "false");
+
+    if (channels != nullptr) {
+        const BitFlags flags = decodeControlFlags(channels[0]);
+
+        debugSerial.print(" flags_raw=");
+        debugSerial.print(channels[0]);
+        debugSerial.print(" id=");
+        debugSerial.print(flags.id);
+        debugSerial.print(" setArm=");
+        debugSerial.print(flags.setArm ? "true" : "false");
+        debugSerial.print(" setEStop=");
+        debugSerial.print(flags.setEStop ? "true" : "false");
+        debugSerial.print(" resetEStop=");
+        debugSerial.print(flags.resetEStop ? "true" : "false");
+        debugSerial.print(" channels=[");
+
+        for (uint8_t i = 0; i < 16; ++i) {
+            if (i > 0) {
+                debugSerial.print(",");
+            }
+            debugSerial.print(channels[i]);
+        }
+
+        debugSerial.print("]");
+    }
+
+    debugSerial.print(" payload_hex=");
+
+    for (uint8_t i = 0; i < len; ++i) {
+        printHexByte(payload[i]);
+    }
+
+    debugSerial.println();
+}
+
+void Drone::printHexByte(uint8_t value) {
+    if (value < 0x10) {
+        debugSerial.print("0");
+    }
+
+    debugSerial.print(value, HEX);
 }

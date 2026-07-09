@@ -4,6 +4,8 @@
 #include <Arduino.h>
 #include <Servo.h>
 
+static constexpr bool ENABLE_HALL_SENSORS = false;
+
 class ArmController {
 public:
     ArmController(uint8_t pwmPin, uint8_t hallPin);

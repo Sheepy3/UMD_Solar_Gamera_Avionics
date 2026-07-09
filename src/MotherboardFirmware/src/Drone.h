@@ -10,6 +10,7 @@
 // true:  [DEBUG] CRSF_CHANNELS [132, 0, ...]
 // false: [DEBUG] armed=false estop=true ...
 static constexpr bool DEBUG_RAW_CRSF_CHANNELS = false;
+static constexpr bool DEBUG_INCOMING_CRSF = false;
 
 // CRSF Address definitions
 enum DestType : uint8_t {
@@ -61,7 +62,7 @@ public:
 
     void setup();
     void main();
-    void triggerEStop();
+    void triggerEStop(const char* reason);
     
 private:
     SerialUSB& debugSerial;
@@ -71,6 +72,8 @@ private:
     bool armed = false;
     bool EStopActive = false;
     uint32_t EStopTriggerTimeMS = 0;
+    uint32_t lastEStopLogTimeMS = 0;
+    const char* lastEStopReason = nullptr;
 
     uint32_t lastUSBRecieveTimeMS = 0;
     uint32_t lastUARTRecieveTimeMS = 0;
@@ -81,9 +84,13 @@ private:
     static const uint32_t ESTOP_LOCKOUT_MS = 10000L;
 
     uint32_t lastSentTelemetry = 0;
+    uint32_t lastIncomingCRSFLogTimeMS = 0;
     
     void sendTelemetry();
     void printDebugTelemetry(const uint16_t values[16]);
+    void printEStopReason(const char* reason);
+    void printIncomingCRSF(const char* sourceName, const uint32_t sourceDtMS, const uint8_t type, const uint8_t* payload, const uint8_t len, const uint16_t* channels, bool ignored);
+    void printHexByte(uint8_t value);
 
     void processIncommingFrame(Radio& source, const uint8_t type, const uint8_t* payload, const uint8_t len);
 };

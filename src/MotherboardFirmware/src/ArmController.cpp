@@ -9,10 +9,15 @@ void ArmController::setup() {
     resetHallTimes();
 
     pinMode(pwmPin, OUTPUT);
-    pinMode(hallPin, INPUT_PULLUP);
 
     escServo.attach(pwmPin);
     escServo.write(0);
+
+    if (!ENABLE_HALL_SENSORS) {
+        return;
+    }
+
+    pinMode(hallPin, INPUT_PULLUP);
 
     instance = this;
     attachInterrupt(digitalPinToInterrupt(hallPin), ArmController::isrWrapper, RISING);
@@ -54,6 +59,10 @@ void ArmController::stop() {
 }
 
 float ArmController::getRPM(uint8_t samples) {
+    if (!ENABLE_HALL_SENSORS) {
+        return 0.0;
+    }
+
     uint32_t now = millis();
     
     noInterrupts();
@@ -85,6 +94,10 @@ float ArmController::getRPM(uint8_t samples) {
 }
 
 bool ArmController::isStalled() {
+    if (!ENABLE_HALL_SENSORS) {
+        return false;
+    }
+
     if (throttle < 0.10f) {
         return false;
     }

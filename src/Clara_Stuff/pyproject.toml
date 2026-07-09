@@ -6,5 +6,5 @@ readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
     "crsf-parser>=0.3.2",
-    "serial>=0.0.97",
+    "pyserial>=3.5",
 ]

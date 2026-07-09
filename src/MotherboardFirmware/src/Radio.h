@@ -26,7 +26,7 @@ private:
     uint8_t buffer[64];
     uint8_t payloadIndex = 0;
     uint8_t expectedLength = 0;
-    uint8_t lastByteTimeMS = 0;
+    uint32_t lastByteTimeMS = 0;
 
     static const uint8_t SYNC_BYTE = 0xC8;
 
