@@ -9,14 +9,14 @@ import time
 
 
 # -------- Packet Constants -------------
-FLAG_A = 9    # arm
-FLAG_B = 17   # e-stop
-FLAG_C = 33   # reset e-stop, disarmed
-FLAG_D = 41   # reset e-stop and arm
+FLAG_A = 172    # arm
+FLAG_B = 992   # e-stop
+FLAG_C = 1811   # reset e-stop, disarmed
+FLAG_D = 410   # reset e-stop and arm this not used
 
 NUM_CHANNELS = 16
 
-CRSF_MIN = 0
+CRSF_MIN = 172
 CRSF_MAX = 2047
 
 PORT = "COM5"
@@ -261,16 +261,35 @@ class App(tk.Tk):
             channels = build_channels(FLAG_C)
 
 
-        print("Channels:", channels)
-        print("Frame:", frame)
-        print("Frame hex:", frame.hex())
-        print()
         self.write_frame(frame)
+        self.debug_print_once_per_second(channels, frame)
 
         # Schedule next loop
         self.after(SEND_RATE_MS, self.send_loop)
 
+    def debug_print_once_per_second(self, channels, frame):
+        now = time.time()
+
+        if not hasattr(self, "last_debug_print"):
+            self.last_debug_print = 0
+
+        if now - self.last_debug_print >= 1.0:
+            print("Channels:", channels)
+            print("Frame hex:", frame.hex())
+            self.last_debug_print = now
+
     def write_frame(self, frame):
+        if not hasattr(self, "tx_count"):
+                self.tx_count = 0
+                self.tx_start_time = time.time()
+
+        self.tx_count += 1
+
+        elapsed = time.time() - self.tx_start_time
+        if elapsed >= 1.0:
+            print(f"TX rate: {self.tx_count / elapsed:.1f} Hz")
+            self.tx_count = 0
+            self.tx_start_time = time.time()
 
         if self.serial_connected and self.ser is not None:
             try:
@@ -279,10 +298,6 @@ class App(tk.Tk):
                 self.serial_connected = False
                 self.status_label.config(text="Status: Serial write failed")
                 print(f"Serial write failed: {error}")
-
-        else:
-            # Useful for testing without radio connected
-            print("Dry frame:", frame)
         
     def on_close(self):
         print("Closing controller.")
@@ -350,10 +365,10 @@ class Arm_Control_Container(ttk.Frame):
         self.setup_widgets()
 
     def percent_to_raw(self, throttle_value_percent):
-        return int((throttle_value_percent / 100) * CRSF_MAX)
+        return int((throttle_value_percent / 100) * (CRSF_MAX - CRSF_MIN))
 
     def raw_to_percent(self, throttle_value_raw):
-        return (throttle_value_raw / CRSF_MAX) * 100
+        return (throttle_value_raw / (CRSF_MAX - CRSF_MIN) * 100)
 
     @property
     def throttle_value(self):
