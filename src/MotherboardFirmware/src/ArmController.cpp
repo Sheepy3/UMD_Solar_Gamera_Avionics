@@ -10,8 +10,8 @@ void ArmController::setup() {
 
     pinMode(pwmPin, OUTPUT);
 
-    escServo.attach(pwmPin);
-    escServo.write(0);
+    escServo.attach(pwmPin, ESC_MIN_PULSE_US, ESC_MAX_PULSE_US);
+    escServo.writeMicroseconds(ESC_MIN_PULSE_US);
 
     if (!ENABLE_HALL_SENSORS) {
         return;
@@ -50,8 +50,9 @@ void ArmController::setThrottle(float inputThrottle) {
 
     throttle = inputThrottle;
 
-    uint8_t servoSetting = throttle * 180;
-    escServo.write(servoSetting);
+    const uint16_t pulseWidthUS = ESC_MIN_PULSE_US +
+        static_cast<uint16_t>(throttle * (ESC_MAX_PULSE_US - ESC_MIN_PULSE_US) + 0.5f);
+    escServo.writeMicroseconds(pulseWidthUS);
 }
 
 void ArmController::stop() {
