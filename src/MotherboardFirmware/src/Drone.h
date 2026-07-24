@@ -77,6 +77,7 @@ private:
 
     uint32_t lastUSBRecieveTimeMS = 0;
     uint32_t lastUARTRecieveTimeMS = 0;
+    uint16_t rawThrottleChannels[4] = {0, 0, 0, 0};
     
     static const uint8_t TELEMETRY_FREQUENCY = 10;
     static const uint32_t TELEMETRY_DELAY = 1000L / TELEMETRY_FREQUENCY;
