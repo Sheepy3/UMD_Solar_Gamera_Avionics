@@ -78,12 +78,16 @@ private:
     uint32_t lastUSBRecieveTimeMS = 0;
     uint32_t lastUARTRecieveTimeMS = 0;
     
-    static const uint8_t TELEMETRY_FREQUENCY = 10;
+    // A packed-channel frame is 26 bytes and has to be fragmented across
+    // several ELRS downlink slots. Keep the proof-of-concept rate modest so
+    // it also works with conservative ELRS telemetry ratios.
+    static const uint8_t TELEMETRY_FREQUENCY = 2;
     static const uint32_t TELEMETRY_DELAY = 1000L / TELEMETRY_FREQUENCY;
     static const uint32_t TIMEOUT_MS = 1000L;
     static const uint32_t ESTOP_LOCKOUT_MS = 10000L;
 
     uint32_t lastSentTelemetry = 0;
+    uint16_t telemetrySequence = 0;
     uint32_t lastIncomingCRSFLogTimeMS = 0;
     
     void sendTelemetry();

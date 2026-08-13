@@ -18,6 +18,8 @@ static const uint16_t CLARA_FLAG_A = 172;
 static const uint16_t CLARA_FLAG_B = 992;
 static const uint16_t CLARA_FLAG_C = 1811;
 static const uint16_t CLARA_FLAG_TOLERANCE = 50;
+static const uint16_t TELEMETRY_MAGIC_A = 0x53A;
+static const uint16_t TELEMETRY_MAGIC_B = 0x2C5;
 
 static bool channelNear(uint16_t value, uint16_t target) {
     return (value > target) ? (value - target <= CLARA_FLAG_TOLERANCE) : (target - value <= CLARA_FLAG_TOLERANCE);
@@ -58,6 +60,12 @@ static BitFlags decodeControlFlags(uint16_t channelValue) {
     }
 
     return unpackBitFlags(channelValue);
+}
+
+static uint16_t rpmToTelemetry(float rpm) {
+    if (rpm <= 0.0f) return 0;
+    if (rpm >= 2047.0f) return 2047;
+    return static_cast<uint16_t>(rpm + 0.5f);
 }
 
 Drone::Drone(DroneParams& params) : armN(params.armNPWMPin, params.armNHallPin),
@@ -194,21 +202,27 @@ void Drone::sendTelemetry() {
 
     values[0] = packBitFlags(flags);
 
-    values[1] = floatToChannel(armN.getRPM());
-    values[2] = floatToChannel(armE.getRPM());
-    values[3] = floatToChannel(armS.getRPM());
-    values[4] = floatToChannel(armW.getRPM());
+    // RPM is already an engineering value. floatToChannel() is only for a
+    // normalized 0..1 value and previously saturated every RPM above 1.
+    values[1] = rpmToTelemetry(armN.getRPM());
+    values[2] = rpmToTelemetry(armE.getRPM());
+    values[3] = rpmToTelemetry(armS.getRPM());
+    values[4] = rpmToTelemetry(armW.getRPM());
 
     values[5] = floatToChannel(armN.getThrottle());
     values[6] = floatToChannel(armE.getThrottle());
     values[7] = floatToChannel(armS.getThrottle());
     values[8] = floatToChannel(armW.getThrottle());
 
-    values[9] = static_cast<uint16_t>((ESTOP_LOCKOUT_MS + EStopTriggerTimeMS - nowMS) / 100U);
-
     uint32_t end = EStopTriggerTimeMS + ESTOP_LOCKOUT_MS;
 
     values[9] = (nowMS < end) ? static_cast<uint16_t>(min((end - nowMS) / 100U, 2047U)) : 0;
+
+    // These fields let main4 distinguish motherboard telemetry from RC input
+    // or other CRSF traffic returned by the ELRS transmitter module.
+    values[10] = telemetrySequence++ & 0x7FF;
+    values[11] = TELEMETRY_MAGIC_A;
+    values[12] = TELEMETRY_MAGIC_B;
 
     values[14] = static_cast<uint16_t>(nowMS & 0x7FF);
     values[15] = static_cast<uint16_t>((nowMS >> 11) & 0x7FF);
@@ -246,6 +260,8 @@ void Drone::printDebugTelemetry(const uint16_t values[16]) {
     debugSerial.print(flags.getArm ? "true" : "false");
     debugSerial.print(" estop=");
     debugSerial.print(flags.getEStop ? "true" : "false");
+    debugSerial.print(" seq=");
+    debugSerial.print(values[10]);
     debugSerial.print(" lockout_ms=");
     debugSerial.print(static_cast<uint32_t>(values[9]) * 100U);
 
@@ -270,7 +286,7 @@ void Drone::main()
     while(true){
         nowMS = millis();
 
-        if (nowMS - lastSentTelemetry > TELEMETRY_DELAY) {
+        if (nowMS - lastSentTelemetry >= TELEMETRY_DELAY) {
             lastSentTelemetry = nowMS;
             sendTelemetry();
         }
