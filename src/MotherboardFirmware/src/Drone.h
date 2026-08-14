@@ -86,7 +86,8 @@ private:
     
     // Keep the proof-of-concept rate modest so it also works with
     // conservative ELRS telemetry ratios.
-    static const uint8_t TELEMETRY_FREQUENCY = 2;
+    static const uint8_t TELEMETRY_FREQUENCY = 1;
+    static constexpr bool TELEMETRY_COMPACT_SIZE_TEST = true;
     static const uint32_t TELEMETRY_DELAY = 1000L / TELEMETRY_FREQUENCY;
     static const uint32_t TIMEOUT_MS = 1000L;
     static const uint32_t ESTOP_LOCKOUT_MS = 10000L;

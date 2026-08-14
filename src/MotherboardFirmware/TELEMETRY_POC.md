@@ -16,8 +16,9 @@
   firmware transmit continuously after the first delay and could saturate the
   receiver-facing UART. It is fixed in the current firmware.
 - The old packed-channel frame was 26 bytes and required fragmentation across
-  rate-limited telemetry slots. The current UQ8.8 proof frame is 34 bytes and
-  remains at 2 Hz while its reliable rate is measured.
+  rate-limited telemetry slots. The UQ8.8 proof frame is 34 bytes. The current
+  controlled test temporarily sends an 18-byte frame at 1 Hz to determine
+  whether frame size is the reason the larger payload is not returned.
 
 ## Proof-of-concept payload
 
@@ -43,6 +44,19 @@ This PoC is merged with the newer firmware channel layout: motor commands use
 CRSF channels 1-4 and the Clara command flag uses channel 6. The host regression
 test verifies that `main4.py` produces exactly that wire order.
 
+### Exact-size control experiment
+
+With `TELEMETRY_COMPACT_SIZE_TEST` enabled, the firmware sends this payload:
+
+```text
+SG3 + 2 status hex characters + 8 timestamp hex characters + NUL
+```
+
+This is a 14-byte payload and an 18-byte complete CRSF frame, exactly matching
+the size of the previously working SG1 proof. It intentionally omits all four
+RPM values so packet length is the only meaningful transport variable. The
+full SG2 encoder and decoder remain in place for re-enabling after the test.
+
 Once this carrier is proven on hardware, standard sensor frames should carry
 values with standard meanings and a documented project-specific extended frame
 can carry arbitrary binary state.
@@ -65,7 +79,8 @@ currently working UART rate of 460800 baud.
 ## Rate and baud settings
 
 - Motherboard telemetry generation rate: `TELEMETRY_FREQUENCY` in `Drone.h`.
-  It is currently 2 Hz. Test 5 Hz and then 10 Hz while watching timestamp gaps
+  It is currently held at 1 Hz for the exact-size control experiment. After
+  transport is characterized, test 5 Hz and then 10 Hz while watching gaps
   and `Motherboard RX rate`; ELRS may overwrite an older queued flight-mode
   sample if this exceeds the configured RF telemetry capacity.
 - Airborne Pico-to-receiver UART: `CRSF_BAUD` in `Drone.cpp`, currently 460800.
@@ -84,7 +99,7 @@ currently working UART rate of 460800 baud.
 2. Set `PORT` and `BAUD` in `src/Clara_Stuff/main4.py` for the ELRS transmitter
    module and run it normally.
 3. Watch the once-per-second console diagnostics:
-   - Pico USB `[DEBUG] CRSF_FLIGHT_MODE payload=SG2...`: the motherboard
+   - Pico USB `[DEBUG] CRSF_FLIGHT_MODE payload=SG3...`: the motherboard
      scheduler generated the new frame.
    - `Serial RX raw`: bytes physically returned to the PC serial port.
    - `CRSF RX rate` or `ELRS link`: the PC is receiving valid binary CRSF from
@@ -92,10 +107,10 @@ currently working UART rate of 460800 baud.
    - `Motherboard RX: MB PoC ... rpm=[...] timestamp_ms=N ...`: the
      complete return path is working.
 4. If the Pico timestamp changes but no motherboard frame reaches the PC, probe
-   GPIO16/header pin 1. The new transmission begins `C8 20 21 53 47 32` and is
-   34 bytes long. No activity means a motherboard TX/pin issue; activity with no
-   returned frame points to receiver wiring/configuration or the RF telemetry
-   ratio.
+   GPIO16/header pin 1. The size-test transmission begins
+   `C8 10 21 53 47 33` and is 18 bytes long. No activity means a motherboard
+   TX/pin issue; activity with no returned frame points to receiver
+   wiring/configuration or the RF telemetry ratio.
 
 Use the diagnostics in this order:
 

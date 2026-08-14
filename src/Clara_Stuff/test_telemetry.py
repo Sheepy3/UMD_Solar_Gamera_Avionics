@@ -53,6 +53,18 @@ def build_flight_mode_poc_frame(status, rpm, timestamp_ms, address=0xC8):
     return frame
 
 
+def build_compact_flight_mode_poc_frame(
+    status, timestamp_ms, address=0xC8
+):
+    payload = f"SG3{status:02X}{timestamp_ms:08X}".encode("ascii") + b"\0"
+    frame = bytearray(
+        [address, len(payload) + 2, FLIGHT_MODE_FRAME_TYPE]
+    )
+    frame.extend(payload)
+    frame.append(crsf_crc(frame[2:]))
+    return frame
+
+
 def unpack_firmware_payload(payload):
     """Decode payload bytes exactly like MotherboardFirmware/util.h."""
     channels = []
@@ -72,6 +84,25 @@ def unpack_firmware_payload(payload):
 
 
 class MotherboardTelemetryTest(unittest.TestCase):
+    def test_compact_poc_matches_working_frame_size_and_decodes(self):
+        frame = build_compact_flight_mode_poc_frame(
+            status=0x06,
+            timestamp_ms=0x1234ABCD,
+            address=0xEA,
+        )
+
+        self.assertEqual(len(frame), 18)
+        self.assertEqual(frame[1], 0x10)
+        telemetry = decode_flight_mode_poc(frame)
+        self.assertFalse(telemetry["armed"])
+        self.assertTrue(telemetry["estop_lockout"])
+        self.assertTrue(telemetry["estop"])
+        self.assertIsNone(telemetry["rpm"])
+        self.assertEqual(telemetry["timestamp_ms"], 0x1234ABCD)
+        formatted = format_flight_mode_poc(telemetry)
+        self.assertIn("rpm=[omitted-size-test]", formatted)
+        self.assertIn("18-byte size test", formatted)
+
     def test_standard_flight_mode_poc_decodes_after_elrs_address_change(self):
         frame = build_flight_mode_poc_frame(
             status=0x07,

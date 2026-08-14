@@ -230,6 +230,29 @@ void Drone::sendTelemetry() {
     data[0] = (armed ? 0x01 : 0x00) |
               (estopLockout ? 0x02 : 0x00) |
               (EStopActive ? 0x04 : 0x00);
+
+    if (TELEMETRY_COMPACT_SIZE_TEST) {
+        // Exact size-control experiment: 13 characters plus NUL produces the
+        // same 14-byte payload / 18-byte complete frame as the working SG1
+        // proof. It carries status and a changing uint32 timestamp only.
+        char compactPayload[14];
+        snprintf(
+            compactPayload,
+            sizeof(compactPayload),
+            "SG3%02X%08lX",
+            static_cast<unsigned int>(data[0]),
+            static_cast<unsigned long>(nowMS)
+        );
+        printDebugTelemetry(compactPayload);
+        uartRadio.send(
+            DestType::GROUND_STATION,
+            PayloadType::FLIGHT_MODE,
+            reinterpret_cast<const uint8_t*>(compactPayload),
+            strlen(compactPayload) + 1
+        );
+        return;
+    }
+
     writeU16BE(&data[1], rpmToUQ8_8(armN.getRPM()));
     writeU16BE(&data[3], rpmToUQ8_8(armE.getRPM()));
     writeU16BE(&data[5], rpmToUQ8_8(armS.getRPM()));

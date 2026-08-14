@@ -39,6 +39,7 @@ TELEMETRY_MAGIC_A = 0x53A
 TELEMETRY_MAGIC_B = 0x2C5
 FLIGHT_MODE_FRAME_TYPE = 0x21
 FLIGHT_MODE_POC_PREFIX = "SG2"
+FLIGHT_MODE_COMPACT_PREFIX = "SG3"
 
 KNOWN_RETURN_TYPES = {
     PacketsTypes.LINK_STATISTICS,
@@ -209,8 +210,8 @@ def decode_motherboard_telemetry(frame):
 def decode_flight_mode_poc(raw_frame):
     """Decode the standard CRSF flight-mode frame used by the new PoC.
 
-    Payload format: ``SG2`` followed by a hex-encoded status byte, four
-    big-endian UQ8.8 RPM values, and a big-endian uint32 millisecond timestamp.
+    ``SG2`` carries status, four UQ8.8 RPMs, and a uint32 timestamp. ``SG3``
+    is an exact-size control experiment carrying status and timestamp only.
     Unrelated flight-mode strings are ignored.
     """
     if len(raw_frame) < 5 or raw_frame[2] != FLIGHT_MODE_FRAME_TYPE:
@@ -221,6 +222,25 @@ def decode_flight_mode_poc(raw_frame):
         text = payload.decode("ascii")
     except UnicodeDecodeError:
         return None
+
+    if len(text) == 13 and text.startswith(FLIGHT_MODE_COMPACT_PREFIX):
+        try:
+            status = int(text[3:5], 16)
+            timestamp_ms = int(text[5:13], 16)
+        except ValueError:
+            return None
+
+        return {
+            "armed": bool(status & 0x01),
+            "estop_lockout": bool(status & 0x02),
+            "estop": bool(status & 0x04),
+            "status": status,
+            "rpm_raw": None,
+            "rpm": None,
+            "timestamp_ms": timestamp_ms,
+            "carrier": "CRSF flight mode 0x21 (18-byte size test)",
+            "raw_text": text,
+        }
 
     if len(text) != 29 or not text.startswith(FLIGHT_MODE_POC_PREFIX):
         return None
@@ -253,7 +273,10 @@ def decode_flight_mode_poc(raw_frame):
 
 
 def format_flight_mode_poc(telemetry):
-    rpm = ",".join(f"{value:.3f}" for value in telemetry["rpm"])
+    if telemetry["rpm"] is None:
+        rpm = "omitted-size-test"
+    else:
+        rpm = ",".join(f"{value:.3f}" for value in telemetry["rpm"])
     return (
         "MB PoC "
         f"armed={str(telemetry['armed']).lower()} "
