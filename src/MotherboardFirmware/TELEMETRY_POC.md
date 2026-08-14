@@ -37,6 +37,10 @@ The frame remains CRSF type `0x16`, with 16 packed 11-bit fields:
 The magic values prevent `main4.py` from confusing control frames or other
 CRSF traffic with motherboard telemetry.
 
+This PoC is merged with the newer firmware channel layout: motor commands use
+CRSF channels 1-4 and the Clara command flag uses channel 6. The host regression
+test verifies that `main4.py` produces exactly that wire order.
+
 `ENABLE_HALL_SENSORS` is currently `false`, so the proof-of-concept RPM fields
 will remain zero until hall sensing is re-enabled; throttle, status, sequence,
 lockout, and uptime still provide changing end-to-end validation data.
