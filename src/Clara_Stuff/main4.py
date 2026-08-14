@@ -5,7 +5,7 @@ import sys
 
 from crsf_parser import CRSFParser, PacketValidationStatus
 from crsf_parser.payloads import PacketsTypes
-from crsf_parser.handling import crsf_build_frame
+from crsf_parser.handling import crsf_build_frame, crsf_crc
 
 import serial
 import time
@@ -37,6 +37,11 @@ SEND_RATE_MS = 20  # 20 ms = 50 Hz
 
 TELEMETRY_MAGIC_A = 0x53A
 TELEMETRY_MAGIC_B = 0x2C5
+
+KNOWN_RETURN_TYPES = {
+    PacketsTypes.LINK_STATISTICS,
+    PacketsTypes.RC_CHANNELS_PACKED,
+}
 
 
 # -------- Packet Functions -------------
@@ -105,6 +110,65 @@ def build_frame_C():
 def build_frame_D():
     channels = build_channels(FLAG_D)
     return build_crsf_frame(channels)
+
+
+def extract_crsf_frames(buffer):
+    """Extract address-agnostic, CRC-valid CRSF frames from a byte stream.
+
+    The old ``crsf-parser`` package hard-codes 0xC8 as the first byte. ELRS
+    handset-side traffic can use a different device address, so framing must
+    be validated by length and CRC before known payloads are handed to that
+    package for decoding.
+    """
+    frames = []
+    discarded_bytes = 0
+    crc_errors = 0
+
+    while len(buffer) >= 4:
+        complete_frame = None
+        earliest_partial = None
+
+        # Search beyond a corrupt/noisy prefix instead of trusting the first
+        # plausible length byte. A payload byte can otherwise masquerade as a
+        # long frame and block parsing while a valid frame is already buffered.
+        for start in range(len(buffer) - 3):
+            frame_length = buffer[start + 1]
+            if frame_length < 2 or frame_length > 62:
+                continue
+
+            total_length = frame_length + 2
+            end = start + total_length
+            if end > len(buffer):
+                if earliest_partial is None:
+                    earliest_partial = start
+                continue
+
+            candidate = bytes(buffer[start:end])
+            if crsf_crc(candidate[2:-1]) == candidate[-1]:
+                complete_frame = (start, end, candidate)
+                break
+
+            crc_errors += 1
+
+        if complete_frame is not None:
+            start, end, candidate = complete_frame
+            discarded_bytes += start
+            del buffer[:end]
+            frames.append(candidate)
+            continue
+
+        if earliest_partial is not None:
+            # Keep the earliest possible partial frame for the next serial
+            # read, but discard any definite noise that precedes it.
+            discarded_bytes += earliest_partial
+            del buffer[:earliest_partial]
+            break
+
+        # No viable complete or partial header begins at the current byte.
+        del buffer[0]
+        discarded_bytes += 1
+
+    return frames, discarded_bytes, crc_errors
 
 
 def decode_motherboard_telemetry(frame):
@@ -178,10 +242,18 @@ class App(tk.Tk):
         self.crsf_parser = CRSFParser(self.on_crsf_frame)
         self.latest_rx_line = "No motherboard response yet"
         self.rx_count = 0
-        self.crsf_rx_count = 0
+        self.raw_rx_byte_count = 0
+        self.wire_frame_count = 0
+        self.tx_echo_count = 0
         self.rx_start_time = time.time()
         self.latest_rx_rate = 0.0
+        self.latest_raw_rx_byte_rate = 0.0
         self.latest_crsf_rx_rate = 0.0
+        self.latest_tx_echo_rate = 0.0
+        self.latest_raw_rx_hex = "none"
+        self.latest_tx_frame = None
+        self.wire_crc_errors = 0
+        self.wire_discarded_bytes = 0
         self.latest_link_line = "No ELRS link statistics yet"
 
         self.is_armed = False
@@ -587,10 +659,17 @@ class App(tk.Tk):
                 f"Motherboard RX rate: {self.latest_rx_rate:.1f} "
                 "telemetry frames/s"
             )
+            print(
+                f"Serial RX raw: {self.latest_raw_rx_byte_rate:.1f} bytes/s "
+                f"last={self.latest_raw_rx_hex}"
+            )
             parser_stats = self.crsf_parser.get_stats()
             print(
                 f"CRSF RX rate: {self.latest_crsf_rx_rate:.1f} frames/s "
-                f"(CRC errors: {parser_stats.crc_errors})"
+                f"(TX echoes: {self.latest_tx_echo_rate:.1f}/s, "
+                f"wire CRC errors: {self.wire_crc_errors}, "
+                f"discarded bytes: {self.wire_discarded_bytes}, "
+                f"payload parse CRC errors: {parser_stats.crc_errors})"
             )
             print(f"ELRS link: {self.latest_link_line}")
             self.last_debug_print = now
@@ -611,6 +690,7 @@ class App(tk.Tk):
         if self.serial_connected and self.ser is not None:
             try:
                 self.ser.write(frame)
+                self.latest_tx_frame = bytes(frame)
             except serial.SerialException as error:
                 self.serial_connected = False
                 self.status_label.config(text="Status: Serial write failed")
@@ -640,16 +720,47 @@ class App(tk.Tk):
             try:
                 waiting = self.ser.in_waiting
                 if waiting > 0:
-                    self.rx_buffer.extend(self.ser.read(waiting))
-                    self.crsf_parser.parse_stream(self.rx_buffer)
+                    chunk = self.ser.read(waiting)
+                    self.raw_rx_byte_count += len(chunk)
+                    self.latest_raw_rx_hex = chunk[-32:].hex()
+                    self.rx_buffer.extend(chunk)
+
+                    frames, discarded, crc_errors = extract_crsf_frames(
+                        self.rx_buffer
+                    )
+                    self.wire_frame_count += len(frames)
+                    self.wire_discarded_bytes += discarded
+                    self.wire_crc_errors += crc_errors
+
+                    for raw_frame in frames:
+                        if raw_frame == self.latest_tx_frame:
+                            self.tx_echo_count += 1
+                            continue
+
+                        if raw_frame[2] not in KNOWN_RETURN_TYPES:
+                            continue
+
+                        # The payload parser requires 0xC8 even though framing
+                        # above has already accepted any valid CRSF address.
+                        normalized = bytearray(raw_frame)
+                        normalized[0] = 0xC8
+                        self.crsf_parser.parse_stream(normalized)
 
                 now = time.time()
                 elapsed = now - self.rx_start_time
                 if elapsed >= 1.0:
                     self.latest_rx_rate = self.rx_count / elapsed
-                    self.latest_crsf_rx_rate = self.crsf_rx_count / elapsed
+                    self.latest_raw_rx_byte_rate = (
+                        self.raw_rx_byte_count / elapsed
+                    )
+                    self.latest_tx_echo_rate = self.tx_echo_count / elapsed
+                    self.latest_crsf_rx_rate = (
+                        self.wire_frame_count - self.tx_echo_count
+                    ) / elapsed
                     self.rx_count = 0
-                    self.crsf_rx_count = 0
+                    self.raw_rx_byte_count = 0
+                    self.wire_frame_count = 0
+                    self.tx_echo_count = 0
                     self.rx_start_time = now
 
             except (serial.SerialException, OSError) as error:
@@ -664,8 +775,6 @@ class App(tk.Tk):
         """Consume CRC-valid motherboard telemetry returned through ELRS."""
         if status != PacketValidationStatus.VALID:
             return
-
-        self.crsf_rx_count += 1
 
         if frame.header.type == PacketsTypes.LINK_STATISTICS:
             self.latest_link_line = (

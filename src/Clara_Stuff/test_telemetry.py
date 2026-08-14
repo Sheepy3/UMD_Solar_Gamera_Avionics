@@ -10,6 +10,7 @@ from main4 import (
     build_channels,
     build_crsf_frame,
     decode_motherboard_telemetry,
+    extract_crsf_frames,
     format_motherboard_telemetry,
 )
 
@@ -53,6 +54,32 @@ def unpack_firmware_payload(payload):
 
 
 class MotherboardTelemetryTest(unittest.TestCase):
+    def test_stream_framing_accepts_non_c8_crsf_address(self):
+        values = [172] * 16
+        frame = build_firmware_frame(values)
+        frame[0] = 0xEA
+        stream = bytearray(b"noise") + frame
+
+        frames, discarded, crc_errors = extract_crsf_frames(stream)
+
+        self.assertEqual(frames, [bytes(frame)])
+        self.assertEqual(discarded, len(b"noise"))
+        self.assertEqual(crc_errors, 0)
+        self.assertEqual(stream, bytearray())
+
+    def test_stream_framing_recovers_after_bad_crc(self):
+        values = [172] * 16
+        bad_frame = build_firmware_frame(values)
+        bad_frame[-1] ^= 0xFF
+        good_frame = build_firmware_frame(values)
+        stream = bad_frame + good_frame
+
+        frames, _, crc_errors = extract_crsf_frames(stream)
+
+        self.assertEqual(frames, [bytes(good_frame)])
+        self.assertGreaterEqual(crc_errors, 1)
+        self.assertEqual(stream, bytearray())
+
     def test_controller_frame_matches_new_firmware_channel_mapping(self):
         requested = build_channels(FLAG_A, n=200, e=300, s=400, w=500)
         frame = build_crsf_frame(requested)

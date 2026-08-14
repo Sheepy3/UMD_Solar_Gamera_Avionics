@@ -67,6 +67,7 @@ currently working UART rate of 460800 baud.
    module and run it normally.
 3. Watch the once-per-second console diagnostics:
    - Pico USB `[DEBUG] ... seq=N`: the motherboard scheduler generated frames.
+   - `Serial RX raw`: bytes physically returned to the PC serial port.
    - `CRSF RX rate` or `ELRS link`: the PC is receiving valid binary CRSF from
      the transmitter module.
    - `Motherboard RX: MB seq=N ...`: the complete return path is working.
@@ -75,6 +76,33 @@ currently working UART rate of 460800 baud.
    long. No activity means a motherboard TX/pin issue; activity there with no
    returned frame points to receiver wiring/configuration or the RF telemetry
    ratio.
+
+Use the diagnostics in this order:
+
+- `Serial RX raw: 0.0 bytes/s`: nothing is reaching the PC. Check the
+  transmitter-breakout `Serial` connection and whether the USB UART supports
+  the module's single-wire half-duplex return direction.
+- Raw bytes present but wire CRC/discard counts rise: check 921600 baud,
+  inversion, voltage level, and bus contention.
+- TX echoes are present but non-echo `CRSF RX rate` remains zero: the adapter
+  can hear its own uplink, but no response from the ELRS transmitter module is
+  reaching the PC.
+- Non-echo CRSF frames or link statistics arrive but motherboard telemetry does
+  not: the ground-side return path works; focus on the airborne receiver RX,
+  Pico GPIO16, and telemetry-ratio configuration.
+
+With `main4.py` stopped so it releases the serial port, query the ELRS
+transmitter module directly:
+
+```powershell
+cd src\Clara_Stuff
+.\.venv\Scripts\python.exe elrs_config.py --port COM8 --baud 921600 --list
+```
+
+A device-info/parameter response proves the ground-side bidirectional path.
+Verify that the listed `TLM Ratio`/telemetry-ratio setting is not `Off`. No
+response means the problem is before the RF telemetry hop: UART wiring,
+half-duplex direction control, baud, inversion, or transmitter-module power.
 
 Run the host-side framing regression test with:
 
