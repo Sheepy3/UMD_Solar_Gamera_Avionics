@@ -37,6 +37,8 @@ SEND_RATE_MS = 20  # 20 ms = 50 Hz
 
 TELEMETRY_MAGIC_A = 0x53A
 TELEMETRY_MAGIC_B = 0x2C5
+FLIGHT_MODE_FRAME_TYPE = 0x21
+FLIGHT_MODE_POC_PREFIX = "SG1"
 
 KNOWN_RETURN_TYPES = {
     PacketsTypes.LINK_STATISTICS,
@@ -202,6 +204,53 @@ def decode_motherboard_telemetry(frame):
         "lockout_ms": channels[9] * 100,
         "uptime_ms": uptime_ms,
     }
+
+
+def decode_flight_mode_poc(raw_frame):
+    """Decode the standard CRSF flight-mode frame used by the new PoC.
+
+    Payload format: ``SG1ssssffuuuu`` where the remaining fields are hex
+    sequence, status flags, and the low 16 bits of motherboard uptime.
+    Unrelated flight-mode strings are ignored.
+    """
+    if len(raw_frame) < 5 or raw_frame[2] != FLIGHT_MODE_FRAME_TYPE:
+        return None
+
+    payload = raw_frame[3:-1].split(b"\0", 1)[0]
+    try:
+        text = payload.decode("ascii")
+    except UnicodeDecodeError:
+        return None
+
+    if len(text) != 13 or not text.startswith(FLIGHT_MODE_POC_PREFIX):
+        return None
+
+    try:
+        sequence = int(text[3:7], 16)
+        status = int(text[7:9], 16)
+        uptime_low_ms = int(text[9:13], 16)
+    except ValueError:
+        return None
+
+    return {
+        "sequence": sequence,
+        "armed": bool(status & 0x01),
+        "estop": bool(status & 0x02),
+        "status": status,
+        "uptime_low_ms": uptime_low_ms,
+        "carrier": "CRSF flight mode 0x21",
+        "raw_text": text,
+    }
+
+
+def format_flight_mode_poc(telemetry):
+    return (
+        f"MB PoC seq={telemetry['sequence']} "
+        f"armed={str(telemetry['armed']).lower()} "
+        f"estop={str(telemetry['estop']).lower()} "
+        f"uptime_low_ms={telemetry['uptime_low_ms']} "
+        f"carrier={telemetry['carrier']}"
+    )
 
 
 def format_motherboard_telemetry(telemetry):
@@ -735,6 +784,14 @@ class App(tk.Tk):
                     for raw_frame in frames:
                         if raw_frame == self.latest_tx_frame:
                             self.tx_echo_count += 1
+                            continue
+
+                        telemetry = decode_flight_mode_poc(raw_frame)
+                        if telemetry is not None:
+                            self.latest_rx_line = format_flight_mode_poc(
+                                telemetry
+                            )
+                            self.rx_count += 1
                             continue
 
                         if raw_frame[2] not in KNOWN_RETURN_TYPES:

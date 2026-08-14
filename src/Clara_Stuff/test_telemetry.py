@@ -5,12 +5,15 @@ from crsf_parser.handling import crsf_crc
 
 from main4 import (
     FLAG_A,
+    FLIGHT_MODE_FRAME_TYPE,
     TELEMETRY_MAGIC_A,
     TELEMETRY_MAGIC_B,
     build_channels,
     build_crsf_frame,
+    decode_flight_mode_poc,
     decode_motherboard_telemetry,
     extract_crsf_frames,
+    format_flight_mode_poc,
     format_motherboard_telemetry,
 )
 
@@ -35,6 +38,19 @@ def build_firmware_frame(values):
     return frame
 
 
+def build_flight_mode_poc_frame(sequence, status, uptime_low_ms, address=0xC8):
+    payload = (
+        f"SG1{sequence:04X}{status:02X}{uptime_low_ms:04X}".encode("ascii")
+        + b"\0"
+    )
+    frame = bytearray(
+        [address, len(payload) + 2, FLIGHT_MODE_FRAME_TYPE]
+    )
+    frame.extend(payload)
+    frame.append(crsf_crc(frame[2:]))
+    return frame
+
+
 def unpack_firmware_payload(payload):
     """Decode payload bytes exactly like MotherboardFirmware/util.h."""
     channels = []
@@ -54,6 +70,30 @@ def unpack_firmware_payload(payload):
 
 
 class MotherboardTelemetryTest(unittest.TestCase):
+    def test_standard_flight_mode_poc_decodes_after_elrs_address_change(self):
+        frame = build_flight_mode_poc_frame(
+            sequence=0x1234,
+            status=0x03,
+            uptime_low_ms=0xABCD,
+            address=0xEA,
+        )
+
+        telemetry = decode_flight_mode_poc(frame)
+
+        self.assertEqual(telemetry["sequence"], 0x1234)
+        self.assertTrue(telemetry["armed"])
+        self.assertTrue(telemetry["estop"])
+        self.assertEqual(telemetry["uptime_low_ms"], 0xABCD)
+        self.assertIn("carrier=CRSF flight mode 0x21", format_flight_mode_poc(telemetry))
+
+    def test_unrelated_flight_mode_is_not_motherboard_telemetry(self):
+        payload = b"ACRO\0"
+        frame = bytearray([0xEA, len(payload) + 2, FLIGHT_MODE_FRAME_TYPE])
+        frame.extend(payload)
+        frame.append(crsf_crc(frame[2:]))
+
+        self.assertIsNone(decode_flight_mode_poc(frame))
+
     def test_stream_framing_accepts_non_c8_crsf_address(self):
         values = [172] * 16
         frame = build_firmware_frame(values)

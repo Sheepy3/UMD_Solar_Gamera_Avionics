@@ -26,7 +26,8 @@ enum PayloadType : uint8_t {
     RC_CHANNELS_PACKED = 0x16,
     BATTERY_SENSOR = 0x08,
     ALTITUDE = 0x1E,
-    LINK_STATISTICS = 0x14
+    LINK_STATISTICS = 0x14,
+    FLIGHT_MODE = 0x21
 };
 
 struct DroneParams{
@@ -83,9 +84,8 @@ private:
     uint32_t lastUARTRecieveTimeMS = 0;
     uint16_t rawThrottleChannels[4] = {0, 0, 0, 0};
     
-    // A packed-channel frame is 26 bytes and has to be fragmented across
-    // several ELRS downlink slots. Keep the proof-of-concept rate modest so
-    // it also works with conservative ELRS telemetry ratios.
+    // Keep the proof-of-concept rate modest so it also works with
+    // conservative ELRS telemetry ratios.
     static const uint8_t TELEMETRY_FREQUENCY = 2;
     static const uint32_t TELEMETRY_DELAY = 1000L / TELEMETRY_FREQUENCY;
     static const uint32_t TIMEOUT_MS = 1000L;
@@ -94,9 +94,9 @@ private:
     uint32_t lastSentTelemetry = 0;
     uint16_t telemetrySequence = 0;
     uint32_t lastIncomingCRSFLogTimeMS = 0;
-    
+
     void sendTelemetry();
-    void printDebugTelemetry(const uint16_t values[16]);
+    void printDebugTelemetry(const char* payload);
     void printEStopReason(const char* reason);
     void printIncomingCRSF(const char* sourceName, const uint32_t sourceDtMS, const uint8_t type, const uint8_t* payload, const uint8_t len, const uint16_t* channels, bool ignored);
     void printHexByte(uint8_t value);

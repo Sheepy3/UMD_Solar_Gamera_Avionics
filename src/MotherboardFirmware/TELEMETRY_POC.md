@@ -2,48 +2,49 @@
 
 ## What was wrong
 
-- The motherboard sends telemetry as a binary CRSF `RC_CHANNELS_PACKED`
-  frame on `Serial1`. `main4.py` was treating all bytes returned by the ELRS
-  transmitter as newline-terminated UTF-8, so it could never recognize that
-  frame.
+- The first motherboard PoC sent telemetry as CRSF `RC_CHANNELS_PACKED`
+  (`0x16`) on `Serial1`. That type is RC control traffic in the opposite
+  direction and was not returned through ELRS even after the ground-side
+  receive path was proven operational.
+- `main4.py` originally treated bytes returned by the ELRS transmitter as
+  newline-terminated UTF-8 and its third-party CRSF parser only accepted a
+  `0xC8` address. The module actually returns frames addressed as `0xEA`.
 - Commit `b3c0511` removed the duplicate binary telemetry frame from the Pico
   USB port and replaced it with readable debug text. The ELRS UART send was not
   removed. USB debug text does not travel through the ELRS return link.
 - Before the same commit, `lastSentTelemetry` was not advanced. That made the
   firmware transmit continuously after the first delay and could saturate the
   receiver-facing UART. It is fixed in the current firmware.
-- The custom frame is 26 bytes and ELRS fragments it across rate-limited
-  telemetry slots. Sending a fresh frame at 10 Hz can outpace conservative
-  telemetry-ratio settings. The proof of concept uses 2 Hz.
-- RPM values were passed through a helper intended for normalized `0..1`
-  values, making almost every nonzero RPM saturate to 2047.
+- The old packed-channel frame was 26 bytes and required more fragmentation
+  across rate-limited telemetry slots. The replacement frame is 18 bytes and
+  the proof of concept remains at 2 Hz.
 
 ## Proof-of-concept payload
 
-The frame remains CRSF type `0x16`, with 16 packed 11-bit fields:
+The replacement uses standard CRSF `FLIGHT_MODE` telemetry (`0x21`) as a
+conservative ASCII carrier. Its null-terminated payload is:
 
-| Channel | Meaning |
-| --- | --- |
-| 0 | status bit flags (`getArm`, `getEStop`) |
-| 1-4 | North/East/South/West RPM, clamped to 0-2047 |
-| 5-8 | North/East/South/West throttle, 0-2047 |
-| 9 | E-stop lockout remaining, in 100 ms units |
-| 10 | 11-bit telemetry sequence number |
-| 11 | magic value `0x53A` |
-| 12 | magic value `0x2C5` |
-| 13 | reserved |
-| 14-15 | low 22 bits of Pico uptime in milliseconds |
+```text
+SG1ssssffuuuu
+```
 
-The magic values prevent `main4.py` from confusing control frames or other
-CRSF traffic with motherboard telemetry.
+- `SG1`: Solar Gamera PoC signature and format version.
+- `ssss`: 16-bit sequence number in hexadecimal.
+- `ff`: status flags in hexadecimal; bit 0 is armed and bit 1 is E-stop.
+- `uuuu`: low 16 bits of Pico uptime in milliseconds, in hexadecimal.
+
+For example, `SG1123401ABCD` means sequence `0x1234`, armed, not E-stopped,
+and uptime-low `0xABCD`. This intentionally demonstrates transport of changing
+application data while remaining a valid, ordinary receiver-to-transmitter
+telemetry frame. It is not the proposed final production schema.
 
 This PoC is merged with the newer firmware channel layout: motor commands use
 CRSF channels 1-4 and the Clara command flag uses channel 6. The host regression
 test verifies that `main4.py` produces exactly that wire order.
 
-`ENABLE_HALL_SENSORS` is currently `false`, so the proof-of-concept RPM fields
-will remain zero until hall sensing is re-enabled; throttle, status, sequence,
-lockout, and uptime still provide changing end-to-end validation data.
+Once this carrier is proven on hardware, standard sensor frames should carry
+values with standard meanings and a documented project-specific extended frame
+can carry arbitrary binary state.
 
 ## Wiring and configuration check
 
@@ -66,14 +67,16 @@ currently working UART rate of 460800 baud.
 2. Set `PORT` and `BAUD` in `src/Clara_Stuff/main4.py` for the ELRS transmitter
    module and run it normally.
 3. Watch the once-per-second console diagnostics:
-   - Pico USB `[DEBUG] ... seq=N`: the motherboard scheduler generated frames.
+   - Pico USB `[DEBUG] CRSF_FLIGHT_MODE payload=SG1...`: the motherboard
+     scheduler generated the new frame.
    - `Serial RX raw`: bytes physically returned to the PC serial port.
    - `CRSF RX rate` or `ELRS link`: the PC is receiving valid binary CRSF from
      the transmitter module.
-   - `Motherboard RX: MB seq=N ...`: the complete return path is working.
+   - `Motherboard RX: MB PoC seq=N ... carrier=CRSF flight mode 0x21`: the
+     complete return path is working.
 4. If the Pico sequence changes but no motherboard frame reaches the PC, probe
-   GPIO16/header pin 1. A valid transmission begins `C8 18 16` and is 26 bytes
-   long. No activity means a motherboard TX/pin issue; activity there with no
+   GPIO16/header pin 1. The new transmission begins `C8 10 21 53 47 31` and is
+   18 bytes long. No activity means a motherboard TX/pin issue; activity with no
    returned frame points to receiver wiring/configuration or the RF telemetry
    ratio.
 
@@ -111,7 +114,7 @@ cd src\Clara_Stuff
 .\.venv\Scripts\python.exe -m unittest -v test_telemetry.py
 ```
 
-For a production protocol, replace the overloaded `0x16` frame with standard
-CRSF sensor frame types where possible and use a documented extended frame for
-project-specific state. This packed frame is intentionally a minimal proof of
-concept compatible with the current MVP controller.
+For a production protocol, use standard CRSF sensor frame types where possible
+and a documented extended frame for project-specific state. The flight-mode
+string is intentionally a minimal transport proof compatible with the current
+MVP controller.

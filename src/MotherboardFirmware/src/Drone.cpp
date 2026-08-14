@@ -18,8 +18,6 @@ static const uint16_t CLARA_FLAG_A = 172;
 static const uint16_t CLARA_FLAG_B = 992;
 static const uint16_t CLARA_FLAG_C = 1811;
 static const uint16_t CLARA_FLAG_TOLERANCE = 50;
-static const uint16_t TELEMETRY_MAGIC_A = 0x53A;
-static const uint16_t TELEMETRY_MAGIC_B = 0x2C5;
 static const uint8_t THROTTLE_N_CHANNEL = 0;
 static const uint8_t THROTTLE_E_CHANNEL = 1;
 static const uint8_t THROTTLE_S_CHANNEL = 2;
@@ -65,12 +63,6 @@ static BitFlags decodeControlFlags(uint16_t channelValue) {
     }
 
     return unpackBitFlags(channelValue);
-}
-
-static uint16_t rpmToTelemetry(float rpm) {
-    if (rpm <= 0.0f) return 0;
-    if (rpm >= 2047.0f) return 2047;
-    return static_cast<uint16_t>(rpm + 0.5f);
 }
 
 Drone::Drone(DroneParams& params) : armN(params.armNPWMPin, params.armNHallPin),
@@ -200,96 +192,38 @@ void Drone::processIncommingFrame(Radio& source, const uint8_t type, const uint8
 }
 
 void Drone::sendTelemetry() {
-    uint16_t values[16] = {0};
+    // CRSF 0x21 is a standard receiver-to-transmitter telemetry frame. Use
+    // its short ASCII flight-mode payload as a deliberately conservative
+    // carrier before defining a project-specific binary extended frame.
+    // Format: SG1 + sequence(4 hex) + status(2 hex) + uptime-low(4 hex).
+    const uint8_t status = (armed ? 0x01 : 0x00) |
+                           (EStopActive ? 0x02 : 0x00);
+    const uint16_t sequence = telemetrySequence++;
+    char payload[16];
 
-    const BitFlags flags{
-        .id         = 0b100,
-        .setArm     = false,
-        .setEStop   = false,
-        .resetEStop = false,
-        .getArm     = armed,
-        .getEStop   = EStopActive
-    };
+    snprintf(
+        payload,
+        sizeof(payload),
+        "SG1%04X%02X%04X",
+        static_cast<unsigned int>(sequence),
+        static_cast<unsigned int>(status),
+        static_cast<unsigned int>(nowMS & 0xFFFF)
+    );
 
-    values[0] = packBitFlags(flags);
-
-    // RPM is already an engineering value. floatToChannel() is only for a
-    // normalized 0..1 value and previously saturated every RPM above 1.
-    values[1] = rpmToTelemetry(armN.getRPM());
-    values[2] = rpmToTelemetry(armE.getRPM());
-    values[3] = rpmToTelemetry(armS.getRPM());
-    values[4] = rpmToTelemetry(armW.getRPM());
-
-    values[5] = floatToChannel(armN.getThrottle());
-    values[6] = floatToChannel(armE.getThrottle());
-    values[7] = floatToChannel(armS.getThrottle());
-    values[8] = floatToChannel(armW.getThrottle());
-
-    uint32_t end = EStopTriggerTimeMS + ESTOP_LOCKOUT_MS;
-
-    values[9] = (nowMS < end) ? static_cast<uint16_t>(min((end - nowMS) / 100U, 2047U)) : 0;
-
-    // These fields let main4 distinguish motherboard telemetry from RC input
-    // or other CRSF traffic returned by the ELRS transmitter module.
-    values[10] = telemetrySequence++ & 0x7FF;
-    values[11] = TELEMETRY_MAGIC_A;
-    values[12] = TELEMETRY_MAGIC_B;
-
-    values[14] = static_cast<uint16_t>(nowMS & 0x7FF);
-    values[15] = static_cast<uint16_t>((nowMS >> 11) & 0x7FF);
-
-    uint8_t payload[22];
-
-    packRCChannels(values, payload);
-
-    printDebugTelemetry(values);
-    uartRadio.send(DestType::GROUND_STATION, 0x16, payload, 22);
+    printDebugTelemetry(payload);
+    uartRadio.send(
+        DestType::GROUND_STATION,
+        PayloadType::FLIGHT_MODE,
+        reinterpret_cast<const uint8_t*>(payload),
+        strlen(payload) + 1
+    );
 
     //TODO: send imu data
 }
 
-void Drone::printDebugTelemetry(const uint16_t values[16]) {
-    if (DEBUG_RAW_CRSF_CHANNELS) {
-        debugSerial.print("[DEBUG] CRSF_CHANNELS [");
-
-        for (uint8_t i = 0; i < 16; ++i) {
-            if (i > 0) {
-                debugSerial.print(", ");
-            }
-            debugSerial.print(values[i]);
-        }
-
-        debugSerial.println("]");
-        return;
-    }
-
-    const BitFlags flags = unpackBitFlags(values[0]);
-    const uint32_t uptimeMS =
-        (static_cast<uint32_t>(values[15]) << 11) | values[14];
-
-    debugSerial.print("[DEBUG] armed=");
-    debugSerial.print(flags.getArm ? "true" : "false");
-    debugSerial.print(" estop=");
-    debugSerial.print(flags.getEStop ? "true" : "false");
-    debugSerial.print(" seq=");
-    debugSerial.print(values[10]);
-    debugSerial.print(" lockout_ms=");
-    debugSerial.print(static_cast<uint32_t>(values[9]) * 100U);
-
-    debugSerial.print(" rpm=[");
-    for (uint8_t i = 1; i <= 4; ++i) {
-        if (i > 1) debugSerial.print(",");
-        debugSerial.print(values[i]);
-    }
-
-    debugSerial.print("] raw_crsf_throttle=[");
-    for (uint8_t i = 0; i < 4; ++i) {
-        if (i > 0) debugSerial.print(",");
-        debugSerial.print(rawThrottleChannels[i]);
-    }
-
-    debugSerial.print("] uptime_ms=");
-    debugSerial.println(uptimeMS);
+void Drone::printDebugTelemetry(const char* payload) {
+    debugSerial.print("[DEBUG] CRSF_FLIGHT_MODE payload=");
+    debugSerial.println(payload);
 }
 
 void Drone::main()
