@@ -15,7 +15,7 @@ public:
     ArmController(uint8_t pwmPin, uint8_t hallPin);
 
     void setup();
-    float getThrottle();
+    float getThrottle() const;
     void setThrottle(float inputThrottle); // 0.0 to 1.0
     void stop();
 

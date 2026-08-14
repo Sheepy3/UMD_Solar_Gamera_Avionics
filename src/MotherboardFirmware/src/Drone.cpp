@@ -69,6 +69,7 @@ Drone::Drone(DroneParams& params) : armN(params.armNPWMPin, params.armNHallPin),
                                    armE(params.armEPWMPin, params.armEHallPin),
                                    armS(params.armSPWMPin, params.armSHallPin),
                                    armW(params.armWPWMPin, params.armWHallPin),
+                                   statusLed(params.statusLedPin),
                                    usbRadio(params.serialParam),
                                    uartRadio(params.radioParam),
                                    debugSerial(params.serialParam)
@@ -87,6 +88,7 @@ void Drone::setup()
     armE.setup();
     armS.setup();
     armW.setup();
+    statusLed.setup();
 
     usbRadio.setCallback([](void* ctx, Radio& source, uint8_t type, uint8_t* payload, uint8_t len) {
         ((Drone*)ctx)->processIncommingFrame(source, type, payload, len);
@@ -294,6 +296,8 @@ void Drone::main()
         if (armN.isStalled() || armE.isStalled() || armS.isStalled() || armW.isStalled()){
             triggerEStop("stall");
         }
+
+        statusLed.update(getLedStatus());
     }
 }
 
@@ -307,6 +311,23 @@ void Drone::triggerEStop(const char* reason){
     armE.stop();
     armS.stop();
     armW.stop();
+}
+
+LedStatus Drone::getLedStatus() const {
+    if (EStopActive && nowMS - EStopTriggerTimeMS < ESTOP_LOCKOUT_MS) {
+        return LedStatus::Lockout;
+    }
+
+    if (!armed) {
+        return EStopTriggerTimeMS != 0 ? LedStatus::LockoutExitedUnarmed : LedStatus::Disarmed;
+    }
+
+    return isThrottleActive() ? LedStatus::ThrottleActive : LedStatus::Armed;
+}
+
+bool Drone::isThrottleActive() const {
+    return armN.getThrottle() > 0.0f || armE.getThrottle() > 0.0f ||
+           armS.getThrottle() > 0.0f || armW.getThrottle() > 0.0f;
 }
 
 void Drone::printEStopReason(const char* reason) {

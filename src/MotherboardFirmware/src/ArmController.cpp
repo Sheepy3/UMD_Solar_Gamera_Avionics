@@ -37,7 +37,7 @@ void ArmController::updateHallTimes() {
     lastPulseTime = currentTime;
 }
 
-float ArmController::getThrottle(){
+float ArmController::getThrottle() const {
     return throttle;
 }
 

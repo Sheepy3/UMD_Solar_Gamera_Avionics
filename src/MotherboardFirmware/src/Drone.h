@@ -4,6 +4,7 @@
 #include <Arduino.h>
 #include <Adafruit_BNO08x.h>
 #include "ArmController.h"
+#include "LedController.h"
 #include "Radio.h"
 #include "util.h"
 
@@ -41,6 +42,8 @@ struct DroneParams{
     int armWPWMPin;
     int armWHallPin;
 
+    int statusLedPin;
+
     SerialUSB& serialParam;
     
     SerialUART& radioParam;
@@ -56,6 +59,7 @@ public:
     ArmController armE;
     ArmController armS;
     ArmController armW;
+    LedController statusLed;
 
     Radio usbRadio;
     Radio uartRadio;
@@ -92,6 +96,8 @@ private:
     void printEStopReason(const char* reason);
     void printIncomingCRSF(const char* sourceName, const uint32_t sourceDtMS, const uint8_t type, const uint8_t* payload, const uint8_t len, const uint16_t* channels, bool ignored);
     void printHexByte(uint8_t value);
+    LedStatus getLedStatus() const;
+    bool isThrottleActive() const;
 
     void processIncommingFrame(Radio& source, const uint8_t type, const uint8_t* payload, const uint8_t len);
 };
