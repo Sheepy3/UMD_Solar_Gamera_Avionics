@@ -15,9 +15,9 @@
 - Before the same commit, `lastSentTelemetry` was not advanced. That made the
   firmware transmit continuously after the first delay and could saturate the
   receiver-facing UART. It is fixed in the current firmware.
-- The old packed-channel frame was 26 bytes and required more fragmentation
-  across rate-limited telemetry slots. The replacement frame is 18 bytes and
-  the proof of concept remains at 2 Hz.
+- The old packed-channel frame was 26 bytes and required fragmentation across
+  rate-limited telemetry slots. The current UQ8.8 proof frame is 34 bytes and
+  remains at 2 Hz while its reliable rate is measured.
 
 ## Proof-of-concept payload
 
@@ -25,18 +25,19 @@ The replacement uses standard CRSF `FLIGHT_MODE` telemetry (`0x21`) as a
 conservative ASCII carrier. Its null-terminated payload is:
 
 ```text
-SG1ssssffuuuu
+SG2 + 26 hexadecimal characters + NUL
 ```
 
-- `SG1`: Solar Gamera PoC signature and format version.
-- `ssss`: 16-bit sequence number in hexadecimal.
-- `ff`: status flags in hexadecimal; bit 0 is armed and bit 1 is E-stop.
-- `uuuu`: low 16 bits of Pico uptime in milliseconds, in hexadecimal.
+- `SG2`: Solar Gamera PoC signature and format version.
+- Byte 0: status flags. Bit 0 is armed, bit 1 is E-stop lockout, bit 2 is
+  E-stop active, and bits 3-7 are reserved.
+- Bytes 1-8: North, East, South, and West RPM as big-endian UQ8.8 values.
+- Bytes 9-12: big-endian unsigned 32-bit Pico uptime in milliseconds.
 
-For example, `SG1123401ABCD` means sequence `0x1234`, armed, not E-stopped,
-and uptime-low `0xABCD`. This intentionally demonstrates transport of changing
-application data while remaining a valid, ordinary receiver-to-transmitter
-telemetry frame. It is not the proposed final production schema.
+UQ8.8 decoding is `raw / 256.0`, providing approximately 0.00390625 RPM
+resolution. The 13 binary bytes are hex encoded because flight mode is defined
+as a null-terminated string. The result is a 30-byte payload and a 34-byte CRSF
+frame. This remains a transport proof rather than a proposed final schema.
 
 This PoC is merged with the newer firmware channel layout: motor commands use
 CRSF channels 1-4 and the Clara command flag uses channel 6. The host regression
@@ -61,22 +62,38 @@ and the receiver's telemetry configuration. Keep the receiver protocol set to
 CRSF and make sure telemetry is not forced off. The firmware retains the
 currently working UART rate of 460800 baud.
 
+## Rate and baud settings
+
+- Motherboard telemetry generation rate: `TELEMETRY_FREQUENCY` in `Drone.h`.
+  It is currently 2 Hz. Test 5 Hz and then 10 Hz while watching timestamp gaps
+  and `Motherboard RX rate`; ELRS may overwrite an older queued flight-mode
+  sample if this exceeds the configured RF telemetry capacity.
+- Airborne Pico-to-receiver UART: `CRSF_BAUD` in `Drone.cpp`, currently 460800.
+  The receiver UART setting must match it.
+- Ground PC-to-transmitter-module UART: `BAUD` in `main4.py`, currently 921600.
+- Controller RC frame request cadence: `SEND_RATE_MS` in `main4.py`, currently
+  20 ms / 50 Hz. Tkinter scheduling currently produces a somewhat lower
+  measured rate.
+- PlatformIO firmware flashing speed is not explicitly overridden in
+  `platformio.ini`; the selected Pico upload protocol uses its default. This is
+  independent of telemetry throughput.
+
 ## End-to-end validation
 
 1. Build and flash `src/MotherboardFirmware`.
 2. Set `PORT` and `BAUD` in `src/Clara_Stuff/main4.py` for the ELRS transmitter
    module and run it normally.
 3. Watch the once-per-second console diagnostics:
-   - Pico USB `[DEBUG] CRSF_FLIGHT_MODE payload=SG1...`: the motherboard
+   - Pico USB `[DEBUG] CRSF_FLIGHT_MODE payload=SG2...`: the motherboard
      scheduler generated the new frame.
    - `Serial RX raw`: bytes physically returned to the PC serial port.
    - `CRSF RX rate` or `ELRS link`: the PC is receiving valid binary CRSF from
      the transmitter module.
-   - `Motherboard RX: MB PoC seq=N ... carrier=CRSF flight mode 0x21`: the
+   - `Motherboard RX: MB PoC ... rpm=[...] timestamp_ms=N ...`: the
      complete return path is working.
-4. If the Pico sequence changes but no motherboard frame reaches the PC, probe
-   GPIO16/header pin 1. The new transmission begins `C8 10 21 53 47 31` and is
-   18 bytes long. No activity means a motherboard TX/pin issue; activity with no
+4. If the Pico timestamp changes but no motherboard frame reaches the PC, probe
+   GPIO16/header pin 1. The new transmission begins `C8 20 21 53 47 32` and is
+   34 bytes long. No activity means a motherboard TX/pin issue; activity with no
    returned frame points to receiver wiring/configuration or the RF telemetry
    ratio.
 

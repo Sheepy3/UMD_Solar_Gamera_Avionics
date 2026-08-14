@@ -92,7 +92,6 @@ private:
     static const uint32_t ESTOP_LOCKOUT_MS = 10000L;
 
     uint32_t lastSentTelemetry = 0;
-    uint16_t telemetrySequence = 0;
     uint32_t lastIncomingCRSFLogTimeMS = 0;
 
     void sendTelemetry();

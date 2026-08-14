@@ -38,11 +38,13 @@ def build_firmware_frame(values):
     return frame
 
 
-def build_flight_mode_poc_frame(sequence, status, uptime_low_ms, address=0xC8):
-    payload = (
-        f"SG1{sequence:04X}{status:02X}{uptime_low_ms:04X}".encode("ascii")
-        + b"\0"
-    )
+def build_flight_mode_poc_frame(status, rpm, timestamp_ms, address=0xC8):
+    data = bytearray([status])
+    for value in rpm:
+        encoded = round(value * 256)
+        data.extend(encoded.to_bytes(2, "big"))
+    data.extend(timestamp_ms.to_bytes(4, "big"))
+    payload = b"SG2" + data.hex().upper().encode("ascii") + b"\0"
     frame = bytearray(
         [address, len(payload) + 2, FLIGHT_MODE_FRAME_TYPE]
     )
@@ -72,19 +74,22 @@ def unpack_firmware_payload(payload):
 class MotherboardTelemetryTest(unittest.TestCase):
     def test_standard_flight_mode_poc_decodes_after_elrs_address_change(self):
         frame = build_flight_mode_poc_frame(
-            sequence=0x1234,
-            status=0x03,
-            uptime_low_ms=0xABCD,
+            status=0x07,
+            rpm=[0.0, 12.5, 37.25, 50.0],
+            timestamp_ms=0x89ABCDEF,
             address=0xEA,
         )
 
         telemetry = decode_flight_mode_poc(frame)
 
-        self.assertEqual(telemetry["sequence"], 0x1234)
         self.assertTrue(telemetry["armed"])
+        self.assertTrue(telemetry["estop_lockout"])
         self.assertTrue(telemetry["estop"])
-        self.assertEqual(telemetry["uptime_low_ms"], 0xABCD)
-        self.assertIn("carrier=CRSF flight mode 0x21", format_flight_mode_poc(telemetry))
+        self.assertEqual(telemetry["rpm"], [0.0, 12.5, 37.25, 50.0])
+        self.assertEqual(telemetry["timestamp_ms"], 0x89ABCDEF)
+        formatted = format_flight_mode_poc(telemetry)
+        self.assertIn("rpm=[0.000,12.500,37.250,50.000]", formatted)
+        self.assertIn("carrier=CRSF flight mode 0x21", formatted)
 
     def test_unrelated_flight_mode_is_not_motherboard_telemetry(self):
         payload = b"ACRO\0"

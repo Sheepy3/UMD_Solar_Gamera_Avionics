@@ -65,6 +65,33 @@ static BitFlags decodeControlFlags(uint16_t channelValue) {
     return unpackBitFlags(channelValue);
 }
 
+static uint16_t rpmToUQ8_8(float rpm) {
+    if (rpm != rpm || rpm <= 0.0f) return 0;
+    if (rpm >= 255.99609375f) return 0xFFFF;
+    return static_cast<uint16_t>(rpm * 256.0f + 0.5f);
+}
+
+static void writeU16BE(uint8_t* destination, uint16_t value) {
+    destination[0] = static_cast<uint8_t>(value >> 8);
+    destination[1] = static_cast<uint8_t>(value);
+}
+
+static void writeU32BE(uint8_t* destination, uint32_t value) {
+    destination[0] = static_cast<uint8_t>(value >> 24);
+    destination[1] = static_cast<uint8_t>(value >> 16);
+    destination[2] = static_cast<uint8_t>(value >> 8);
+    destination[3] = static_cast<uint8_t>(value);
+}
+
+static void bytesToHex(const uint8_t* source, size_t length, char* destination) {
+    static const char HEX_DIGITS[] = "0123456789ABCDEF";
+    for (size_t i = 0; i < length; ++i) {
+        destination[i * 2] = HEX_DIGITS[source[i] >> 4];
+        destination[i * 2 + 1] = HEX_DIGITS[source[i] & 0x0F];
+    }
+    destination[length * 2] = '\0';
+}
+
 Drone::Drone(DroneParams& params) : armN(params.armNPWMPin, params.armNHallPin),
                                    armE(params.armEPWMPin, params.armEHallPin),
                                    armS(params.armSPWMPin, params.armSHallPin),
@@ -193,22 +220,25 @@ void Drone::processIncommingFrame(Radio& source, const uint8_t type, const uint8
 
 void Drone::sendTelemetry() {
     // CRSF 0x21 is a standard receiver-to-transmitter telemetry frame. Use
-    // its short ASCII flight-mode payload as a deliberately conservative
-    // carrier before defining a project-specific binary extended frame.
-    // Format: SG1 + sequence(4 hex) + status(2 hex) + uptime-low(4 hex).
-    const uint8_t status = (armed ? 0x01 : 0x00) |
-                           (EStopActive ? 0x02 : 0x00);
-    const uint16_t sequence = telemetrySequence++;
-    char payload[16];
+    // its null-terminated ASCII payload as a hex carrier for 13 data bytes.
+    // Binary layout: status, four big-endian UQ8.8 RPMs, uint32 uptime_ms.
+    static const size_t DATA_LENGTH = 13;
+    uint8_t data[DATA_LENGTH] = {0};
+    const bool estopLockout = EStopActive &&
+        nowMS - EStopTriggerTimeMS < ESTOP_LOCKOUT_MS;
 
-    snprintf(
-        payload,
-        sizeof(payload),
-        "SG1%04X%02X%04X",
-        static_cast<unsigned int>(sequence),
-        static_cast<unsigned int>(status),
-        static_cast<unsigned int>(nowMS & 0xFFFF)
-    );
+    data[0] = (armed ? 0x01 : 0x00) |
+              (estopLockout ? 0x02 : 0x00) |
+              (EStopActive ? 0x04 : 0x00);
+    writeU16BE(&data[1], rpmToUQ8_8(armN.getRPM()));
+    writeU16BE(&data[3], rpmToUQ8_8(armE.getRPM()));
+    writeU16BE(&data[5], rpmToUQ8_8(armS.getRPM()));
+    writeU16BE(&data[7], rpmToUQ8_8(armW.getRPM()));
+    writeU32BE(&data[9], nowMS);
+
+    // SG2 + 26 hex characters + NUL = 30 payload bytes.
+    char payload[30] = "SG2";
+    bytesToHex(data, DATA_LENGTH, &payload[3]);
 
     printDebugTelemetry(payload);
     uartRadio.send(
