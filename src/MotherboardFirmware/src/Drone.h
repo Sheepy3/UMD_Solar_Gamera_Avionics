@@ -30,6 +30,10 @@ enum PayloadType : uint8_t {
     FLIGHT_MODE = 0x21
 };
 
+enum class TelemetryPacketType : uint8_t {
+    PRIMARY = 0x01
+};
+
 struct DroneParams{
     int armNPWMPin;
     int armNHallPin;
@@ -84,10 +88,8 @@ private:
     uint32_t lastUARTRecieveTimeMS = 0;
     uint16_t rawThrottleChannels[4] = {0, 0, 0, 0};
     
-    // Keep the proof-of-concept rate modest so it also works with
-    // conservative ELRS telemetry ratios.
-    static const uint8_t TELEMETRY_FREQUENCY = 1;
-    static constexpr bool TELEMETRY_COMPACT_SIZE_TEST = true;
+
+    static const uint8_t TELEMETRY_FREQUENCY = 12; //Hz - 12 found to be highest possible at 1:4 ratio on 250Hz packet rate.
     static const uint32_t TELEMETRY_DELAY = 1000L / TELEMETRY_FREQUENCY;
     static const uint32_t TIMEOUT_MS = 1000L;
     static const uint32_t ESTOP_LOCKOUT_MS = 10000L;
@@ -96,7 +98,6 @@ private:
     uint32_t lastIncomingCRSFLogTimeMS = 0;
 
     void sendTelemetry();
-    void printDebugTelemetry(const char* payload);
     void printEStopReason(const char* reason);
     void printIncomingCRSF(const char* sourceName, const uint32_t sourceDtMS, const uint8_t type, const uint8_t* payload, const uint8_t len, const uint16_t* channels, bool ignored);
     void printHexByte(uint8_t value);

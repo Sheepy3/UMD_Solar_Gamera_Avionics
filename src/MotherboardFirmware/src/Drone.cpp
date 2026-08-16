@@ -65,10 +65,10 @@ static BitFlags decodeControlFlags(uint16_t channelValue) {
     return unpackBitFlags(channelValue);
 }
 
-static uint16_t rpmToUQ8_8(float rpm) {
+static uint16_t rpmToMilliRPM(float rpm) {
     if (rpm != rpm || rpm <= 0.0f) return 0;
-    if (rpm >= 255.99609375f) return 0xFFFF;
-    return static_cast<uint16_t>(rpm * 256.0f + 0.5f);
+    if (rpm >= 65.535f) return 0xFFFF;
+    return static_cast<uint16_t>(rpm * 1000.0f + 0.5f);
 }
 
 static void writeU16BE(uint8_t* destination, uint16_t value) {
@@ -81,15 +81,6 @@ static void writeU32BE(uint8_t* destination, uint32_t value) {
     destination[1] = static_cast<uint8_t>(value >> 16);
     destination[2] = static_cast<uint8_t>(value >> 8);
     destination[3] = static_cast<uint8_t>(value);
-}
-
-static void bytesToHex(const uint8_t* source, size_t length, char* destination) {
-    static const char HEX_DIGITS[] = "0123456789ABCDEF";
-    for (size_t i = 0; i < length; ++i) {
-        destination[i * 2] = HEX_DIGITS[source[i] >> 4];
-        destination[i * 2 + 1] = HEX_DIGITS[source[i] & 0x0F];
-    }
-    destination[length * 2] = '\0';
 }
 
 Drone::Drone(DroneParams& params) : armN(params.armNPWMPin, params.armNHallPin),
@@ -219,64 +210,31 @@ void Drone::processIncommingFrame(Radio& source, const uint8_t type, const uint8
 }
 
 void Drone::sendTelemetry() {
-    // CRSF 0x21 is a standard receiver-to-transmitter telemetry frame. Use
-    // its null-terminated ASCII payload as a hex carrier for 13 data bytes.
-    // Binary layout: status, four big-endian UQ8.8 RPMs, uint32 uptime_ms.
-    static const size_t DATA_LENGTH = 13;
-    uint8_t data[DATA_LENGTH] = {0};
+    // The current ELRS configuration reliably carries complete CRSF frames
+    // through 20 bytes. primary packet sends 14 payload bytes plus address,
+    // length, CRSF type, and CRC.
+    static const size_t PAYLOAD_LENGTH = 14;
+    static_assert(PAYLOAD_LENGTH + 4 == 18, "Primary telemetry must be 18 bytes");
+    uint8_t payload[PAYLOAD_LENGTH] = {0};
     const bool estopLockout = EStopActive &&
         nowMS - EStopTriggerTimeMS < ESTOP_LOCKOUT_MS;
 
-    data[0] = (armed ? 0x01 : 0x00) |
-              (estopLockout ? 0x02 : 0x00) |
-              (EStopActive ? 0x04 : 0x00);
+    payload[0] = static_cast<uint8_t>(TelemetryPacketType::PRIMARY);
+    payload[1] = (armed ? 0x01 : 0x00) |
+                 (estopLockout ? 0x02 : 0x00) |
+                 (EStopActive ? 0x04 : 0x00);
+    writeU16BE(&payload[2], rpmToMilliRPM(armN.getRPM()));
+    writeU16BE(&payload[4], rpmToMilliRPM(armE.getRPM()));
+    writeU16BE(&payload[6], rpmToMilliRPM(armS.getRPM()));
+    writeU16BE(&payload[8], rpmToMilliRPM(armW.getRPM()));
+    writeU32BE(&payload[10], nowMS);
 
-    if (TELEMETRY_COMPACT_SIZE_TEST) {
-        // Exact size-control experiment: 13 characters plus NUL produces the
-        // same 14-byte payload / 18-byte complete frame as the working SG1
-        // proof. It carries status and a changing uint32 timestamp only.
-        char compactPayload[14];
-        snprintf(
-            compactPayload,
-            sizeof(compactPayload),
-            "SG3%02X%08lX",
-            static_cast<unsigned int>(data[0]),
-            static_cast<unsigned long>(nowMS)
-        );
-        printDebugTelemetry(compactPayload);
-        uartRadio.send(
-            DestType::GROUND_STATION,
-            PayloadType::FLIGHT_MODE,
-            reinterpret_cast<const uint8_t*>(compactPayload),
-            strlen(compactPayload) + 1
-        );
-        return;
-    }
-
-    writeU16BE(&data[1], rpmToUQ8_8(armN.getRPM()));
-    writeU16BE(&data[3], rpmToUQ8_8(armE.getRPM()));
-    writeU16BE(&data[5], rpmToUQ8_8(armS.getRPM()));
-    writeU16BE(&data[7], rpmToUQ8_8(armW.getRPM()));
-    writeU32BE(&data[9], nowMS);
-
-    // SG2 + 26 hex characters + NUL = 30 payload bytes.
-    char payload[30] = "SG2";
-    bytesToHex(data, DATA_LENGTH, &payload[3]);
-
-    printDebugTelemetry(payload);
     uartRadio.send(
         DestType::GROUND_STATION,
         PayloadType::FLIGHT_MODE,
-        reinterpret_cast<const uint8_t*>(payload),
-        strlen(payload) + 1
+        payload,
+        sizeof(payload)
     );
-
-    //TODO: send imu data
-}
-
-void Drone::printDebugTelemetry(const char* payload) {
-    debugSerial.print("[DEBUG] CRSF_FLIGHT_MODE payload=");
-    debugSerial.println(payload);
 }
 
 void Drone::main()

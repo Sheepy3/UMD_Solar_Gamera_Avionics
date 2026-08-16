@@ -30,20 +30,17 @@ THROTTLE_S_CHANNEL = 2
 THROTTLE_W_CHANNEL = 3
 COMMAND_FLAG_CHANNEL = 5
 
-PORT = "COM8"
+PORT = "COM6"
 BAUD = 921600
 
 SEND_RATE_MS = 20  # 20 ms = 50 Hz
 
-TELEMETRY_MAGIC_A = 0x53A
-TELEMETRY_MAGIC_B = 0x2C5
 FLIGHT_MODE_FRAME_TYPE = 0x21
-FLIGHT_MODE_POC_PREFIX = "SG2"
-FLIGHT_MODE_COMPACT_PREFIX = "SG3"
+PRIMARY_TELEMETRY_PACKET_TYPE = 0x01
+PRIMARY_TELEMETRY_FRAME_BYTES = 18
 
 KNOWN_RETURN_TYPES = {
     PacketsTypes.LINK_STATISTICS,
-    PacketsTypes.RC_CHANNELS_PACKED,
 }
 
 
@@ -174,131 +171,45 @@ def extract_crsf_frames(buffer):
     return frames, discarded_bytes, crc_errors
 
 
-def decode_motherboard_telemetry(frame):
-    """Decode the motherboard's packed-channel telemetry proof of concept.
-
-    The third-party parser presents packed channels in reverse order, so put
-    them back into the firmware's channel order before interpreting fields.
-    Return ``None`` for ordinary RC frames and unrelated CRSF traffic.
-    """
-    if frame.header.type != PacketsTypes.RC_CHANNELS_PACKED:
-        return None
-
-    channels = list(reversed(frame.payload.channels))
+def decode_primary_telemetry(raw_frame):
+    """Decode the motherboard's 18-byte primary telemetry packet."""
     if (
-        channels[11] != TELEMETRY_MAGIC_A
-        or channels[12] != TELEMETRY_MAGIC_B
+        len(raw_frame) != PRIMARY_TELEMETRY_FRAME_BYTES
+        or raw_frame[2] != FLIGHT_MODE_FRAME_TYPE
     ):
         return None
 
-    flags = channels[0]
-    uptime_ms = (channels[15] << 11) | channels[14]
-
-    return {
-        "sequence": channels[10],
-        "armed": bool(flags & (1 << 6)),
-        "estop": bool(flags & (1 << 7)),
-        "rpm": channels[1:5],
-        "throttle_percent": [
-            value * 100.0 / 2047.0 for value in channels[5:9]
-        ],
-        "lockout_ms": channels[9] * 100,
-        "uptime_ms": uptime_ms,
-    }
-
-
-def decode_flight_mode_poc(raw_frame):
-    """Decode the standard CRSF flight-mode frame used by the new PoC.
-
-    ``SG2`` carries status, four UQ8.8 RPMs, and a uint32 timestamp. ``SG3``
-    is an exact-size control experiment carrying status and timestamp only.
-    Unrelated flight-mode strings are ignored.
-    """
-    if len(raw_frame) < 5 or raw_frame[2] != FLIGHT_MODE_FRAME_TYPE:
+    payload = raw_frame[3:-1]
+    if len(payload) != 14 or payload[0] != PRIMARY_TELEMETRY_PACKET_TYPE:
         return None
 
-    payload = raw_frame[3:-1].split(b"\0", 1)[0]
-    try:
-        text = payload.decode("ascii")
-    except UnicodeDecodeError:
-        return None
-
-    if len(text) == 13 and text.startswith(FLIGHT_MODE_COMPACT_PREFIX):
-        try:
-            status = int(text[3:5], 16)
-            timestamp_ms = int(text[5:13], 16)
-        except ValueError:
-            return None
-
-        return {
-            "armed": bool(status & 0x01),
-            "estop_lockout": bool(status & 0x02),
-            "estop": bool(status & 0x04),
-            "status": status,
-            "rpm_raw": None,
-            "rpm": None,
-            "timestamp_ms": timestamp_ms,
-            "carrier": "CRSF flight mode 0x21 (18-byte size test)",
-            "raw_text": text,
-        }
-
-    if len(text) != 29 or not text.startswith(FLIGHT_MODE_POC_PREFIX):
-        return None
-
-    try:
-        data = bytes.fromhex(text[3:])
-    except ValueError:
-        return None
-
-    if len(data) != 13:
-        return None
-
-    status = data[0]
-    rpm_raw = [
-        int.from_bytes(data[offset:offset + 2], "big")
-        for offset in range(1, 9, 2)
+    status = payload[1]
+    rpm_millirpm = [
+        int.from_bytes(payload[offset:offset + 2], "big")
+        for offset in range(2, 10, 2)
     ]
-
     return {
+        "packet_type": payload[0],
         "armed": bool(status & 0x01),
         "estop_lockout": bool(status & 0x02),
         "estop": bool(status & 0x04),
         "status": status,
-        "rpm_raw": rpm_raw,
-        "rpm": [value / 256.0 for value in rpm_raw],
-        "timestamp_ms": int.from_bytes(data[9:13], "big"),
-        "carrier": "CRSF flight mode 0x21",
-        "raw_text": text,
+        "rpm_millirpm": rpm_millirpm,
+        "rpm": [value / 1000.0 for value in rpm_millirpm],
+        "timestamp_ms": int.from_bytes(payload[10:14], "big"),
+        "raw_hex": payload.hex(),
     }
 
 
-def format_flight_mode_poc(telemetry):
-    if telemetry["rpm"] is None:
-        rpm = "omitted-size-test"
-    else:
-        rpm = ",".join(f"{value:.3f}" for value in telemetry["rpm"])
+def format_primary_telemetry(telemetry):
+    rpm = ",".join(f"{value:.3f}" for value in telemetry["rpm"])
     return (
-        "MB PoC "
+        "MB primary "
+        f"type=0x{telemetry['packet_type']:02X} "
         f"armed={str(telemetry['armed']).lower()} "
         f"estop_lockout={str(telemetry['estop_lockout']).lower()} "
         f"estop={str(telemetry['estop']).lower()} "
-        f"rpm=[{rpm}] timestamp_ms={telemetry['timestamp_ms']} "
-        f"carrier={telemetry['carrier']}"
-    )
-
-
-def format_motherboard_telemetry(telemetry):
-    throttle = ",".join(
-        f"{value:.1f}%" for value in telemetry["throttle_percent"]
-    )
-    rpm = ",".join(str(value) for value in telemetry["rpm"])
-    return (
-        f"MB seq={telemetry['sequence']} "
-        f"armed={str(telemetry['armed']).lower()} "
-        f"estop={str(telemetry['estop']).lower()} "
-        f"lockout_ms={telemetry['lockout_ms']} "
-        f"rpm=[{rpm}] throttle=[{throttle}] "
-        f"uptime_ms={telemetry['uptime_ms']}"
+        f"rpm=[{rpm}] timestamp_ms={telemetry['timestamp_ms']}"
     )
 
 
@@ -820,9 +731,9 @@ class App(tk.Tk):
                             self.tx_echo_count += 1
                             continue
 
-                        telemetry = decode_flight_mode_poc(raw_frame)
+                        telemetry = decode_primary_telemetry(raw_frame)
                         if telemetry is not None:
-                            self.latest_rx_line = format_flight_mode_poc(
+                            self.latest_rx_line = format_primary_telemetry(
                                 telemetry
                             )
                             self.rx_count += 1
@@ -863,7 +774,7 @@ class App(tk.Tk):
         self.after(SEND_RATE_MS, self.receive_loop)
 
     def on_crsf_frame(self, frame, status):
-        """Consume CRC-valid motherboard telemetry returned through ELRS."""
+        """Consume known CRSF return frames handled by the payload parser."""
         if status != PacketValidationStatus.VALID:
             return
 
@@ -874,12 +785,6 @@ class App(tk.Tk):
                 f"uplink_rssi=-{frame.payload.uplink_rssi_ant_1}dBm"
             )
 
-        telemetry = decode_motherboard_telemetry(frame)
-        if telemetry is None:
-            return
-
-        self.latest_rx_line = format_motherboard_telemetry(telemetry)
-        self.rx_count += 1
 # -------- Arm Controller Widget -------------
 
 class Arm_Control_Container(ttk.Frame):

@@ -44,3 +44,4 @@ fp-info-cache
 *.zip
 
 /.vs
+.vscode/
