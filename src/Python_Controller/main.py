@@ -2,6 +2,207 @@ import dearpygui.dearpygui as dpg
 import os
 import platform
 
+
+ARM_SPECS = (
+    ("n", "N", 37.0, 37.0),
+    ("e", "E", 100.0, 27.0),
+    ("s", "S", 100.0, 27.0),
+    ("w", "W", 50.0, 17.0),
+)
+
+# Layout constraints. Screen positions are intentionally not included here;
+# containers determine placement and the resize callback only adjusts heights.
+DEFAULT_VIEWPORT_WIDTH = 1500
+DEFAULT_VIEWPORT_HEIGHT = 1000
+TITLE_COLUMN_WIDTH = 220
+ARM_CARD_HEIGHT = 190
+TOGGLE_HEIGHT = 100
+VALUE_ROW_HEIGHT = 40
+ESTOP_ROW_HEIGHT = 80
+OUTPUT_BUTTON_HEIGHT = 30
+START_BUTTON_HEIGHT = 50
+MIN_PLOT_HEIGHT = 160
+LAYOUT_VERTICAL_OVERHEAD = 435
+
+
+class ArmCard:
+    """Reusable controls and readouts for one helicopter arm."""
+
+    def __init__(
+        self,
+        arm_id,
+        label,
+        throttle_percent=0.0,
+        rpm=0.0,
+        toggle_themes=None,
+        font=None,
+    ):
+        self.arm_id = arm_id
+        self.label = label
+        self.enabled = False
+        self.throttle_percent = throttle_percent
+        self.rpm = rpm
+        self.toggle_themes = toggle_themes or {}
+        self.font = font
+
+        self.card_tag = f"arm_{arm_id}_card"
+        self.toggle_drawlist_tag = f"arm_{arm_id}_toggle_drawlist"
+        self.toggle_handler_tag = f"arm_{arm_id}_toggle_handlers"
+        self.resize_handler_tag = f"arm_{arm_id}_resize_handlers"
+        self.label_tag = f"arm_{arm_id}_label"
+        self.throttle_tag = f"arm_{arm_id}_throttle"
+        self.rpm_tag = f"arm_{arm_id}_rpm"
+
+    def build(self, parent):
+        with dpg.child_window(
+            tag=self.card_tag,
+            parent=parent,
+            width=-1,
+            height=ARM_CARD_HEIGHT,
+            border=False,
+            no_scrollbar=True,
+            no_scroll_with_mouse=True,
+        ):
+            dpg.add_drawlist(
+                tag=self.toggle_drawlist_tag,
+                # Drawlists need a concrete canvas size. This is replaced by
+                # the stretched card width after the first layout frame.
+                width=150,
+                height=TOGGLE_HEIGHT,
+            )
+            dpg.add_button(
+                label=self.label,
+                tag=self.label_tag,
+                width=-1,
+                height=30,
+                enabled=False,
+            )
+            with dpg.table(
+                header_row=False,
+                policy=dpg.mvTable_SizingStretchSame,
+                width=-1,
+                no_pad_outerX=True,
+            ):
+                dpg.add_table_column(width_stretch=True)
+                dpg.add_table_column(width_stretch=True)
+                with dpg.table_row():
+                    with dpg.table_cell():
+                        dpg.add_button(
+                            label=self._format_throttle(),
+                            tag=self.throttle_tag,
+                            width=-1,
+                            height=VALUE_ROW_HEIGHT,
+                            enabled=False,
+                        )
+                    with dpg.table_cell():
+                        dpg.add_button(
+                            label=self._format_rpm(),
+                            tag=self.rpm_tag,
+                            width=-1,
+                            height=VALUE_ROW_HEIGHT,
+                            enabled=False,
+                        )
+
+        with dpg.item_handler_registry(tag=self.toggle_handler_tag):
+            dpg.add_item_clicked_handler(callback=self.toggle)
+        dpg.bind_item_handler_registry(
+            self.toggle_drawlist_tag,
+            self.toggle_handler_tag,
+        )
+
+        with dpg.item_handler_registry(tag=self.resize_handler_tag):
+            dpg.add_item_resize_handler(callback=self._on_resize)
+        dpg.bind_item_handler_registry(self.card_tag, self.resize_handler_tag)
+
+        self._apply_shared_style()
+        self._redraw_toggle()
+
+    def toggle(self, sender=None, app_data=None, user_data=None):
+        self.enabled = not self.enabled
+        self._redraw_toggle()
+        print(f"Arm {self.label} toggle {'ON' if self.enabled else 'OFF'}")
+
+    def _on_resize(self, sender=None, app_data=None, user_data=None):
+        self._redraw_toggle()
+
+    def set_throttle(self, percent):
+        self.throttle_percent = percent
+        dpg.configure_item(self.throttle_tag, label=self._format_throttle())
+
+    def set_rpm(self, rpm):
+        self.rpm = rpm
+        dpg.configure_item(self.rpm_tag, label=self._format_rpm())
+
+    def _format_throttle(self):
+        return f"{self.throttle_percent:g} %"
+
+    def _format_rpm(self):
+        return f"{self.rpm:g} RPM"
+
+    def _apply_shared_style(self):
+        card_theme = self.toggle_themes.get("card")
+        if card_theme is not None:
+            dpg.bind_item_theme(self.card_tag, card_theme)
+
+        value_theme = self.toggle_themes.get("value")
+        for tag in (self.label_tag, self.throttle_tag, self.rpm_tag):
+            if value_theme is not None:
+                dpg.bind_item_theme(tag, value_theme)
+            if self.font is not None:
+                dpg.bind_item_font(tag, self.font)
+
+    def _redraw_toggle(self):
+        dpg.delete_item(self.toggle_drawlist_tag, children_only=True)
+
+        card_width = dpg.get_item_rect_size(self.card_tag)[0]
+        if card_width > 1:
+            draw_width = round(card_width)
+            dpg.configure_item(self.toggle_drawlist_tag, width=draw_width)
+        else:
+            draw_width = 150
+
+        margin = max(8, round(draw_width * 0.08))
+        knob_width = max(50, round(draw_width * 0.5))
+
+        dpg.draw_rectangle(
+            (0, 0),
+            (draw_width - 1, TOGGLE_HEIGHT - 1),
+            color=(0, 0, 0, 255),
+            fill=(255, 255, 255, 255),
+            parent=self.toggle_drawlist_tag,
+        )
+
+        if self.enabled:
+            knob_right = draw_width - margin
+            knob_left = knob_right - knob_width
+            knob_color = (48, 81, 242, 255)
+        else:
+            knob_left = margin
+            knob_right = knob_left + knob_width
+            knob_color = (200, 200, 200, 255)
+
+        knob_min = (knob_left, 10)
+        knob_max = (knob_right, TOGGLE_HEIGHT - 10)
+        text_pos = ((knob_left + knob_right) / 2 - 22, 43)
+
+        dpg.draw_rectangle(
+            knob_min,
+            knob_max,
+            color=knob_color,
+            fill=knob_color,
+            parent=self.toggle_drawlist_tag,
+        )
+        dpg.draw_text(
+            text_pos,
+            "Toggle",
+            color=(255, 255, 255, 255),
+            size=15,
+            parent=self.toggle_drawlist_tag,
+        )
+
+arm_cards = {}
+
+
 # Front
 def create_fonts():
     system = platform.system()
@@ -43,6 +244,9 @@ def theme_main_window():
     with dpg.theme() as window_theme:
         with dpg.theme_component(dpg.mvWindowAppItem):
             dpg.add_theme_color(dpg.mvThemeCol_WindowBg, (255, 255, 255, 255))
+        with dpg.theme_component(dpg.mvChildWindow):
+            dpg.add_theme_color(dpg.mvThemeCol_ChildBg, (255, 255, 255, 255))
+            dpg.add_theme_color(dpg.mvThemeCol_WindowBg, (255, 255, 255, 255))
         with dpg.theme_component(dpg.mvText):
             dpg.add_theme_color(dpg.mvThemeCol_Text, (0, 0, 0, 255))
     dpg.bind_item_theme("main_window", window_theme)
@@ -68,18 +272,24 @@ def theme_stop_button():
     dpg.bind_item_theme("e_stop_button", button_theme2)
     dpg.bind_item_theme("choose_output_button", button_theme2)
 
-def theme_toggle_hitbox():
-    with dpg.theme() as invisible_theme:
-        with dpg.theme_component(dpg.mvButton):
-            dpg.add_theme_color(dpg.mvThemeCol_Button, (0, 0, 0, 0))
-            dpg.add_theme_color(dpg.mvThemeCol_ButtonHovered, (0, 0, 0, 0))
-            dpg.add_theme_color(dpg.mvThemeCol_ButtonActive, (0, 0, 0, 0))
-            dpg.add_theme_color(dpg.mvThemeCol_Border, (0, 0, 0, 0))
+def create_arm_card_themes():
+    themes = {}
 
-    dpg.bind_item_theme("toggle_hitbox1", invisible_theme)
-    dpg.bind_item_theme("toggle_hitbox2", invisible_theme)
-    dpg.bind_item_theme("toggle_hitbox3", invisible_theme)
-    dpg.bind_item_theme("toggle_hitbox4", invisible_theme)
+    with dpg.theme() as themes["card"]:
+        with dpg.theme_component(dpg.mvChildWindow):
+            dpg.add_theme_color(dpg.mvThemeCol_ChildBg, (255, 255, 255, 255))
+            dpg.add_theme_color(dpg.mvThemeCol_WindowBg, (255, 255, 255, 255))
+            dpg.add_theme_style(dpg.mvStyleVar_WindowPadding, 0, 0)
+            dpg.add_theme_style(dpg.mvStyleVar_ItemSpacing, 0, 4)
+
+    with dpg.theme() as themes["value"]:
+        with dpg.theme_component(dpg.mvButton):
+            dpg.add_theme_color(dpg.mvThemeCol_Button, (255, 255, 255, 255))
+            dpg.add_theme_color(dpg.mvThemeCol_Text, (0, 0, 0, 255))
+            dpg.add_theme_color(dpg.mvThemeCol_Border, (0, 0, 0, 255))
+            dpg.add_theme_style(dpg.mvStyleVar_DisabledAlpha, 1.0)
+
+    return themes
 
 def theme_power_slider():
     with dpg.theme() as slider_theme:
@@ -105,470 +315,250 @@ def load_texture(path):
     width, height, channels, data = image_data
     return dpg.add_static_texture(width, height, data)
 """
-# Main function
+def add_arm_plot(arm_id, label):
+    """Build one plot that stretches to the width of its table cell."""
+    with dpg.plot(
+        label=f"RPM and Throttle% vs time ({label})",
+        tag=f"plot_{arm_id}",
+        height=MIN_PLOT_HEIGHT,
+        width=-1,
+    ):
+        dpg.add_plot_legend()
+        dpg.add_plot_axis(dpg.mvXAxis, label="Time")
+        y_axis = dpg.add_plot_axis(dpg.mvYAxis, label="RPM")
+        dpg.add_line_series(
+            [],
+            [],
+            parent=y_axis,
+            tag=f"rpm_series_{arm_id}",
+            label="Live Data",
+        )
+
+
+def update_responsive_layout(sender=None, app_data=None, user_data=None):
+    """Resize height-dependent controls after the viewport changes."""
+    viewport_height = dpg.get_viewport_client_height()
+    plot_height = max(
+        MIN_PLOT_HEIGHT,
+        (viewport_height - LAYOUT_VERTICAL_OVERHEAD) // 2,
+    )
+
+    for arm_id, *_ in ARM_SPECS:
+        dpg.configure_item(f"plot_{arm_id}", height=plot_height)
+
+    dpg.configure_item(
+        "power_slider",
+        height=max(MIN_PLOT_HEIGHT, plot_height * 2 + 8),
+    )
+
+    # The viewport callback runs before Dear ImGui lays out the resized table.
+    # Redraw on the following frame, when each card's rendered width is final.
+    dpg.set_frame_callback(
+        dpg.get_frame_count() + 2,
+        refresh_arm_card_layout,
+    )
+
+
+def refresh_arm_card_layout(sender=None, app_data=None, user_data=None):
+    """Apply the header table's settled widths to the custom toggle canvases."""
+    for card in arm_cards.values():
+        card._redraw_toggle()
+
+
 def main():
+    global power_percent, start
+
+    power_percent = 0
+    start = False
+    arm_cards.clear()
+
     dpg.create_context()
-    dpg.create_viewport(title="Solar Gamera", width=1500, height=1000)
+    dpg.create_viewport(
+        title="Solar Gamera",
+        width=DEFAULT_VIEWPORT_WIDTH,
+        height=DEFAULT_VIEWPORT_HEIGHT,
+    )
     dpg.setup_dearpygui()
 
     fonts = create_fonts()
+    arm_themes = create_arm_card_themes()
 
-    with dpg.texture_registry():
-        # Better to use an English-only path if possible
-        image_path = "D:/image.png" # change the image storage path
+    with dpg.file_dialog(
+        directory_selector=False,
+        show=False,
+        callback=save_file_callback,
+        tag="save_file_dialog",
+        width=700,
+        height=400,
+        default_filename="output.txt",
+    ):
+        dpg.add_file_extension(".txt")
+        dpg.add_file_extension(".csv")
 
     with dpg.window(tag="main_window"):
-        dpg.add_text("Solar Gamera", tag="title_text", pos=(30, 20))
-        """
-        with dpg.texture_registry():
-            image_path = "/Users/yxt/Desktop/image.png"  # change to your Mac path
-    
-        if os.path.exists(image_path):
-            my_texture = load_texture(image_path)
-        else:
-            print(f"Warning: Image not found → {image_path}")
-            my_texture = None
-        """
-
-        with dpg.plot(label="PPM and Throttle% vs time (N)", height=280, width=390, pos=(650, 310)):
-            dpg.add_plot_legend()
-            dpg.add_plot_axis(dpg.mvXAxis, label="Time")
-            y_axis_n = dpg.add_plot_axis(dpg.mvYAxis, label="RPM")
-            dpg.add_line_series([], [], parent=y_axis_n, tag="rpm_series_n", label="Live Data")
-        
-        with dpg.plot(label="PPM and Throttle% vs time (S)", height=280, width=390, pos=(1040, 310)):
-            dpg.add_plot_legend()
-            dpg.add_plot_axis(dpg.mvXAxis, label="Time")
-            y_axis_s = dpg.add_plot_axis(dpg.mvYAxis, label="RPM")
-            dpg.add_line_series([], [], parent=y_axis_s, tag="rpm_series_s", label="Live Data")
-        
-        with dpg.plot(label="PPM and Throttle% vs time (E)", height=280, width=390, pos=(650, 590)):
-            dpg.add_plot_legend()
-            dpg.add_plot_axis(dpg.mvXAxis, label="Time")
-            y_axis_e = dpg.add_plot_axis(dpg.mvYAxis, label="RPM")
-            dpg.add_line_series([], [], parent=y_axis_e, tag="rpm_series_e", label="Live Data")
-        
-        with dpg.plot(label="PPM and Throttle% vs time (W)", height=280, width=390, pos=(1040, 590)):
-            dpg.add_plot_legend()
-            dpg.add_plot_axis(dpg.mvXAxis, label="Time")
-            y_axis_w = dpg.add_plot_axis(dpg.mvYAxis, label="RPM")
-            dpg.add_line_series([], [], parent=y_axis_w, tag="rpm_series_w", label="Live Data")
-
-        """
-        dpg.set_value("rpm_series_n", [ ])
-        dpg.set_value("rpm_series_s", [ ])
-        dpg.set_value("rpm_series_e", [ ])
-        dpg.set_value("rpm_series_w", [ ])
-        """
-        #dpg.add_button(label="Add Data", callback=add_point, pos=(650, 870))
-
-
-        # file outputing 
-
-        with dpg.file_dialog(
-            directory_selector=False,
-            show=False,
-            callback=save_file_callback,
-            tag="save_file_dialog",
-            width=700,
-            height=400,
-            default_filename="output.txt"
+        # Header: a fixed title column and four equally stretchable arm cards.
+        with dpg.table(
+            tag="header_layout",
+            header_row=False,
+            policy=dpg.mvTable_SizingStretchSame,
+            width=-1,
+            no_pad_outerX=True,
         ):
-            dpg.add_file_extension(".txt")
-            dpg.add_file_extension(".csv")
+            dpg.add_table_column(
+                width_fixed=True,
+                init_width_or_weight=TITLE_COLUMN_WIDTH,
+            )
+            for _ in ARM_SPECS:
+                dpg.add_table_column(
+                    width_stretch=True,
+                    init_width_or_weight=1.0,
+                )
 
+            with dpg.table_row():
+                with dpg.table_cell():
+                    dpg.add_spacer(height=8)
+                    dpg.add_text("Solar Gamera", tag="title_text")
 
-        dpg.add_button(
-            label="Choose Output File",
-            tag="choose_output_button",
-            width=780,
-            height=30,
-            pos=(650, 870),
-            callback=open_save_dialog
-        )
+                for arm_id, label, throttle, rpm in ARM_SPECS:
+                    with dpg.table_cell() as card_cell:
+                        card = ArmCard(
+                            arm_id,
+                            label,
+                            throttle_percent=throttle,
+                            rpm=rpm,
+                            toggle_themes=arm_themes,
+                            font=fonts["small"],
+                        )
+                        card.build(card_cell)
+                        arm_cards[arm_id] = card
 
+        # Body: the sidebar and dashboard expand in proportion to one another.
+        with dpg.table(
+            tag="body_layout",
+            header_row=False,
+            policy=dpg.mvTable_SizingStretchProp,
+            width=-1,
+            height=-1,
+            no_pad_outerX=True,
+        ):
+            dpg.add_table_column(width_stretch=True, init_width_or_weight=1.0)
+            dpg.add_table_column(width_stretch=True, init_width_or_weight=2.6)
 
-        # Emergency Stop Button
-        dpg.add_button(label="EMERGENCY STOP",
-            tag="stop_button",
-            callback=Emerstop,
-            width=620,
-            height=80,
-            pos=(650, 218)
-        )
+            with dpg.table_row():
+                with dpg.table_cell():
+                    with dpg.child_window(
+                        tag="control_sidebar",
+                        width=-1,
+                        height=-1,
+                        border=False,
+                    ):
+                        dpg.add_text(RSSI_val(), tag="RSSI_text")
+                        dpg.add_text(LQ_val(), tag="LQ_text")
+                        dpg.add_text(SNR_val(), tag="SNR_text")
+                        dpg.add_spacer(height=8)
+                        dpg.add_slider_float(
+                            tag="power_slider",
+                            default_value=0,
+                            min_value=0,
+                            max_value=100,
+                            vertical=True,
+                            width=-1,
+                            height=MIN_PLOT_HEIGHT,
+                            callback=power_slider_fun,
+                        )
+                        dpg.add_button(
+                            label="Start",
+                            tag="start_button",
+                            width=-1,
+                            height=START_BUTTON_HEIGHT,
+                            callback=start_button_fun,
+                        )
 
-        # E-STOP Reset
-        dpg.add_button(label="E-STOP Reset",
-            tag="e_stop_button",
-            callback=estop,
-            width=160,
-            height=80,
-            pos=(1270, 218),
-        )
+                with dpg.table_cell():
+                    with dpg.child_window(
+                        tag="dashboard",
+                        width=-1,
+                        height=-1,
+                        border=False,
+                    ):
+                        with dpg.table(
+                            tag="estop_layout",
+                            header_row=False,
+                            policy=dpg.mvTable_SizingStretchProp,
+                            width=-1,
+                            no_pad_outerX=True,
+                        ):
+                            dpg.add_table_column(
+                                width_stretch=True,
+                                init_width_or_weight=4.0,
+                            )
+                            dpg.add_table_column(
+                                width_stretch=True,
+                                init_width_or_weight=1.0,
+                            )
+                            with dpg.table_row():
+                                with dpg.table_cell():
+                                    dpg.add_button(
+                                        label="EMERGENCY STOP",
+                                        tag="stop_button",
+                                        callback=Emerstop,
+                                        width=-1,
+                                        height=ESTOP_ROW_HEIGHT,
+                                    )
+                                with dpg.table_cell():
+                                    dpg.add_button(
+                                        label="E-STOP Reset",
+                                        tag="e_stop_button",
+                                        callback=estop,
+                                        width=-1,
+                                        height=ESTOP_ROW_HEIGHT,
+                                    )
 
-        dpg.draw_rectangle(
-            (10, 303),
-            (510, 350),
-            color=(0, 0, 0, 255),
-            fill=(255, 255, 255, 255),  # white
-            parent="value_layer"
-        )
+                        with dpg.table(
+                            tag="plot_grid",
+                            header_row=False,
+                            policy=dpg.mvTable_SizingStretchSame,
+                            width=-1,
+                            no_pad_outerX=True,
+                        ):
+                            dpg.add_table_column(width_stretch=True)
+                            dpg.add_table_column(width_stretch=True)
 
-        # RSSI
-        RSSI = RSSI_val( )
-        dpg.draw_text(
-            (20, 315),
-            RSSI,
-            tag="RSSI_text",
-            size=25,
-            color=(0, 0, 0, 255),
-            parent="value_layer"
-        )
+                            plot_specs = (
+                                (("n", "N"), ("s", "S")),
+                                (("e", "E"), ("w", "W")),
+                            )
+                            for plot_row in plot_specs:
+                                with dpg.table_row():
+                                    for arm_id, label in plot_row:
+                                        with dpg.table_cell():
+                                            add_arm_plot(arm_id, label)
 
-        # LQ
-        LQ = LQ_val( )
-        dpg.draw_text(
-            (225, 315),
-            LQ,
-            tag="LQ_text",
-            size=25,
-            color=(0, 0, 0, 255),
-            parent="value_layer"
-        )
-
-        # SNR
-        SNR = SNR_val( )
-        dpg.draw_text(
-            (380, 315),
-            SNR,
-            tag="SNR_text",
-            size=25,
-            color=(0, 0, 0, 255),
-            parent="value_layer"
-        )
-
-        # Toggle Button 1
-        dpg.add_button(
-            label="",
-            tag="toggle_hitbox1",
-            width=150,
-            height=300,
-            pos=(650, 20),
-            callback=toggle1
-        )
-
-        # Toggle Button 2
-        dpg.add_button(
-            label="",
-            tag="toggle_hitbox2",
-            width=150,
-            height=300,
-            pos=(850, 20),
-            callback=toggle2
-        )
-
-        # Toggle Button 3
-        dpg.add_button(
-            label="",
-            tag="toggle_hitbox3",
-            width=150,
-            height=300,
-            pos=(1050, 20),
-            callback=toggle3
-        )
-
-        # Toggle Button 4
-        dpg.add_button(
-            label="",
-            tag="toggle_hitbox4",
-            width=150,
-            height=300,
-            pos=(1250, 20),
-            callback=toggle4
-        )
-
-        # Percentage and RPM 1
-        dpg.draw_rectangle(
-            (642, 160),
-            (700, 200),
-            color=(0, 0, 0, 255),
-            fill=(255, 255, 255, 255),  # white
-            parent="value_layer"
-        )
-
-        dpg.draw_rectangle(
-            (710, 160),
-            (793, 200),
-            color=(0, 0, 0, 255),
-            fill=(255, 255, 255, 255),  # white
-            parent="value_layer"
-        )
-
-        perc1 = angvel1()[0]
-
-        dpg.draw_text(
-            (647, 168),
-            perc1,
-            tag="rpm_text",
-            size=20,
-            color=(0, 0, 0, 255),
-            parent="value_layer"
-        )
-
-        rpm1 = angvel1()[1]
-
-        dpg.draw_text(
-            (718, 168),
-            rpm1,
-            tag="rpm_text1",
-            size=20,
-            color=(0, 0, 0, 255),
-            parent="value_layer"
-        )
-
-        dpg.draw_rectangle(
-            (642, 120),
-            (793, 150),
-            color=(0, 0, 0, 255),
-            fill=(255, 255, 255, 255),  # white
-            parent="value_layer"
-        )
-        dpg.draw_text(
-            (710, 127),
-            "N",
-            tag="rpm_text2",
-            size=17,
-            color=(0, 0, 0, 255),
-            parent="value_layer"
-        )
-
-        # Percentage and RPM 2
-        dpg.draw_rectangle(
-            (852, 160),
-            (912, 200),
-            color=(0, 0, 0, 255),
-            fill=(255, 255, 255, 255),  # white
-            parent="value_layer"
-        )
-
-        dpg.draw_rectangle(
-            (920, 160),
-            (1003, 200),
-            color=(0, 0, 0, 255),
-            fill=(255, 255, 255, 255),  # white
-            parent="value_layer"
-        )
-
-        perc2 = angvel2()[0]
-
-        dpg.draw_text(
-            (857, 168),
-            perc2,
-            tag="rpm_text3",
-            size=20,
-            color=(0, 0, 0, 255),
-            parent="value_layer"
-        )
-
-        rpm2 = angvel2()[1]
-
-        dpg.draw_text(
-            (928, 168),
-            rpm2,
-            tag="rpm_text4",
-            size=20,
-            color=(0, 0, 0, 255),
-            parent="value_layer"
-        )
-
-        dpg.draw_rectangle(
-            (852, 120),
-            (1003, 150),
-            color=(0, 0, 0, 255),
-            fill=(255, 255, 255, 255),  # white
-            parent="value_layer"
-        )
-        dpg.draw_text(
-            (920, 127),
-            "E",
-            tag="rpm_text5",
-            size=17,
-            color=(0, 0, 0, 255),
-            parent="value_layer"
-        )
-
-        # Percentage and RPM 3
-        dpg.draw_rectangle(
-            (1062, 160),
-            (1122, 200),
-            color=(0, 0, 0, 255),
-            fill=(255, 255, 255, 255),  # white
-            parent="value_layer"
-        )
-
-        dpg.draw_rectangle(
-            (1130, 160),
-            (1213, 200),
-            color=(0, 0, 0, 255),
-            fill=(255, 255, 255, 255),  # white
-            parent="value_layer"
-        )
-
-        perc3 = angvel3()[0]
-
-        dpg.draw_text(
-            (1067, 168),
-            perc3,
-            tag="rpm_text6",
-            size=20,
-            color=(0, 0, 0, 255),
-            parent="value_layer"
-        )
-
-        rpm3 = angvel3()[1]
-
-        dpg.draw_text(
-            (1138, 168),
-            rpm3,
-            tag="rpm_text7",
-            size=20,
-            color=(0, 0, 0, 255),
-            parent="value_layer"
-        )
-
-        dpg.draw_rectangle(
-            (1062, 120),
-            (1213, 150),
-            color=(0, 0, 0, 255),
-            fill=(255, 255, 255, 255),  # white
-            parent="value_layer"
-        )
-        dpg.draw_text(
-            (1130, 127),
-            "S",
-            tag="rpm_text8",
-            size=17,
-            color=(0, 0, 0, 255),
-            parent="value_layer"
-        )
-
-        # Percentage and RPM 4
-        dpg.draw_rectangle(
-            (1272, 160),
-            (1332, 200),
-            color=(0, 0, 0, 255),
-            fill=(255, 255, 255, 255),  # white
-            parent="value_layer"
-        )
-
-        dpg.draw_rectangle(
-            (1340, 160),
-            (1423, 200),
-            color=(0, 0, 0, 255),
-            fill=(255, 255, 255, 255),  # white
-            parent="value_layer"
-        )
-
-        perc4 = angvel4()[0]
-
-        dpg.draw_text(
-            (1277, 168),
-            perc4,
-            tag="rpm_text9",
-            size=20,
-            color=(0, 0, 0, 255),
-            parent="value_layer"
-        )
-
-        rpm4 = angvel4()[1]
-
-        dpg.draw_text(
-            (1348, 168),
-            rpm4,
-            tag="rpm_text10",
-            size=20,
-            color=(0, 0, 0, 255),
-            parent="value_layer"
-        )
-
-        dpg.draw_rectangle(
-            (1272, 120),
-            (1423, 150),
-            color=(0, 0, 0, 255),
-            fill=(255, 255, 255, 255),  # white
-            parent="value_layer"
-        )
-        dpg.draw_text(
-            (1340, 127),
-            "W",
-            tag="rpm_text11",
-            size=17,
-            color=(0, 0, 0, 255),
-            parent="value_layer"
-        )
-
-        # vertical slider
-        
-        power_percent = 0
-        start = False #initialize
-        
-        dpg.add_slider_float(
-            tag="power_slider",
-            default_value=0,
-            min_value=0,
-            max_value=100,
-            vertical=True,
-            pos=(530, 310),
-            width=100,
-            height=540,
-            callback=power_slider_fun
-        )
-        theme_power_slider()
-
-        # Start Motors button
-        dpg.add_button(
-            label="Start",
-            tag="start_button",
-            width=100,
-            height=50,
-            pos=(530, 850),
-            callback=start_button_fun
-        )
-
-    with dpg.viewport_drawlist(front=True, tag="toggle_layer"):
-        pass
-
-
-
-    redraw_toggles()
+                        dpg.add_button(
+                            label="Choose Output File",
+                            tag="choose_output_button",
+                            width=-1,
+                            height=OUTPUT_BUTTON_HEIGHT,
+                            callback=open_save_dialog,
+                        )
 
     apply_font("title_text", fonts["title"])
     apply_font("stop_button", fonts["large"])
     apply_font("e_stop_button", fonts["medium"])
-    apply_font("RSSI_text", fonts["title"])
-    apply_font("LQ_text", fonts["title"])
-    apply_font("SNR_text", fonts["title"])
-    apply_font("rpm_text", fonts["title"])
-    apply_font("rpm_text1", fonts["title"])
-    apply_font("rpm_text2", fonts["title"])
-    apply_font("rpm_text3", fonts["title"])
-    apply_font("rpm_text4", fonts["title"])
-    apply_font("rpm_text5", fonts["title"])
-    apply_font("rpm_text6", fonts["title"])
-    apply_font("rpm_text7", fonts["title"])
-    apply_font("rpm_text8", fonts["title"])
-    apply_font("rpm_text9", fonts["title"])
-    apply_font("rpm_text10", fonts["title"])
-    apply_font("rpm_text11", fonts["title"])
+    apply_font("RSSI_text", fonts["medium"])
+    apply_font("LQ_text", fonts["medium"])
+    apply_font("SNR_text", fonts["medium"])
     apply_font("start_button", fonts["medium"])
 
     theme_main_window()
     theme_stop_button()
-    theme_toggle_hitbox()
-
+    theme_power_slider()
     dpg.set_primary_window("main_window", True)
+    dpg.set_viewport_resize_callback(update_responsive_layout)
 
     dpg.show_viewport()
+    dpg.set_frame_callback(1, update_responsive_layout)
+    dpg.set_frame_callback(2, refresh_arm_card_layout)
     dpg.start_dearpygui()
     dpg.destroy_context()
 
@@ -610,113 +600,6 @@ def SNR_val():
     val = 12
     ouput = f"LQ = {val}db"
     return ouput
-
-# Toggle Button initial state
-toggle_state1 = {"up": False}
-toggle_state2 = {"up": False}
-toggle_state3 = {"up": False}
-toggle_state4 = {"up": False}
-
-# Toggle Button Moving Function
-def draw_toggle(TOGGLE_X, TOGGLE_Y, state, hitbox_tag, text_tag):
-    TOGGLE_W = 150
-    TOGGLE_H = 100
-
-    dpg.draw_rectangle(
-        (TOGGLE_X, TOGGLE_Y),
-        (TOGGLE_X + TOGGLE_W, TOGGLE_Y + TOGGLE_H),
-        color=(0, 0, 0, 255),
-        thickness=1,
-        parent="toggle_layer"
-    )
-
-    if state["up"]: #right active
-        x1 = TOGGLE_X + 15 - 2 + 50 
-        x2 = TOGGLE_X + 100 - 10 -2 + 50
-        text_x = 78
-        border_col = (120, 180, 120, 255)
-        fill_col = (48, 81, 242, 255)
-    else: #left inactive
-        x1 = TOGGLE_X + 15 - 2
-        x2 = TOGGLE_X + 100 - 10 -2
-        text_x = 25
-        border_col = (200, 200, 200, 255)
-        fill_col = (200, 200, 200, 255)
-
-    dpg.draw_rectangle(
-        (x1 , TOGGLE_Y + 10),
-        (x2, TOGGLE_Y + 90),
-        fill=fill_col,
-        color=border_col,
-        thickness=1,
-        parent="toggle_layer"
-    )
-
-    dpg.draw_text(
-        (TOGGLE_X + text_x, TOGGLE_Y + 50),
-        "Toggle",
-        color=(255, 255, 255, 255),
-        size=15,
-        parent="toggle_layer",
-        tag=text_tag
-    )
-
-    dpg.set_item_pos(hitbox_tag, (TOGGLE_X, TOGGLE_Y))
-
-# Reset toggle button postion every click
-def redraw_toggles():
-    dpg.delete_item("toggle_layer", children_only=True)
-    draw_toggle(650, 20, toggle_state1, "toggle_hitbox1", "toggletext1")
-    draw_toggle(860, 20, toggle_state2, "toggle_hitbox2", "toggletext2")
-    draw_toggle(1070, 20, toggle_state3, "toggle_hitbox3", "toggletext3")
-    draw_toggle(1280, 20, toggle_state4, "toggle_hitbox4", "toggletext4")
-
-
-# Toggle Button 1 Function
-def toggle1():
-    toggle_state1["up"] = not toggle_state1["up"]
-    redraw_toggles()
-    print("Toggle 1 Pressed")
-
-# Toggle Button 2 Function
-def toggle2():
-    toggle_state2["up"] = not toggle_state2["up"]
-    redraw_toggles()
-    print("Toggle 2 Pressed")
-
-# Toggle Button 3 Function
-def toggle3():
-    toggle_state3["up"] = not toggle_state3["up"]
-    redraw_toggles()
-    print("Toggle 3 Pressed")
-
-# Toggle Button 4 Function
-def toggle4():
-    toggle_state4["up"] = not toggle_state4["up"]
-    redraw_toggles()
-    print("Toggle 4 Pressed")
-
-# Angular velocity box
-def angvel1():
-    rpm = f"{37} RPM"
-    perc = f"{37} %"
-    return perc, rpm
-
-def angvel2():
-    rpm = f"{27} RPM"
-    perc = f"{100} %"
-    return perc, rpm
-
-def angvel3():
-    rpm = f"{27} RPM"
-    perc = f"{100} %"
-    return perc, rpm
-
-def angvel4():
-    rpm = f"{17} RPM"
-    perc = f"{50} %"
-    return perc, rpm
-
 
 # Set power input
 def power_slider_fun(sender, app_data):
