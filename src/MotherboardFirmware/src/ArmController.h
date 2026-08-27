@@ -8,10 +8,14 @@ static constexpr bool ENABLE_HALL_SENSORS = false;
 
 class ArmController {
 public:
+    // Adjust these to the calibrated throttle range required by the ESCs.
+    static constexpr uint16_t ESC_MIN_PULSE_US = 1060;
+    static constexpr uint16_t ESC_MAX_PULSE_US = 2290;
+
     ArmController(uint8_t pwmPin, uint8_t hallPin);
 
     void setup();
-    float getThrottle();
+    float getThrottle() const;
     void setThrottle(float inputThrottle); // 0.0 to 1.0
     void stop();
 

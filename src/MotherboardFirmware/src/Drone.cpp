@@ -18,6 +18,11 @@ static const uint16_t CLARA_FLAG_A = 172;
 static const uint16_t CLARA_FLAG_B = 992;
 static const uint16_t CLARA_FLAG_C = 1811;
 static const uint16_t CLARA_FLAG_TOLERANCE = 50;
+static const uint8_t THROTTLE_N_CHANNEL = 0;
+static const uint8_t THROTTLE_E_CHANNEL = 1;
+static const uint8_t THROTTLE_S_CHANNEL = 2;
+static const uint8_t THROTTLE_W_CHANNEL = 3;
+static const uint8_t COMMAND_FLAG_CHANNEL = 5;
 
 static bool channelNear(uint16_t value, uint16_t target) {
     return (value > target) ? (value - target <= CLARA_FLAG_TOLERANCE) : (target - value <= CLARA_FLAG_TOLERANCE);
@@ -60,10 +65,29 @@ static BitFlags decodeControlFlags(uint16_t channelValue) {
     return unpackBitFlags(channelValue);
 }
 
+static uint16_t rpmToMilliRPM(float rpm) {
+    if (rpm != rpm || rpm <= 0.0f) return 0;
+    if (rpm >= 65.535f) return 0xFFFF;
+    return static_cast<uint16_t>(rpm * 1000.0f + 0.5f);
+}
+
+static void writeU16BE(uint8_t* destination, uint16_t value) {
+    destination[0] = static_cast<uint8_t>(value >> 8);
+    destination[1] = static_cast<uint8_t>(value);
+}
+
+static void writeU32BE(uint8_t* destination, uint32_t value) {
+    destination[0] = static_cast<uint8_t>(value >> 24);
+    destination[1] = static_cast<uint8_t>(value >> 16);
+    destination[2] = static_cast<uint8_t>(value >> 8);
+    destination[3] = static_cast<uint8_t>(value);
+}
+
 Drone::Drone(DroneParams& params) : armN(params.armNPWMPin, params.armNHallPin),
                                    armE(params.armEPWMPin, params.armEHallPin),
                                    armS(params.armSPWMPin, params.armSHallPin),
                                    armW(params.armWPWMPin, params.armWHallPin),
+                                   statusLed(params.statusLedPin),
                                    usbRadio(params.serialParam),
                                    uartRadio(params.radioParam),
                                    debugSerial(params.serialParam)
@@ -82,6 +106,7 @@ void Drone::setup()
     armE.setup();
     armS.setup();
     armW.setup();
+    statusLed.setup();
 
     usbRadio.setCallback([](void* ctx, Radio& source, uint8_t type, uint8_t* payload, uint8_t len) {
         ((Drone*)ctx)->processIncommingFrame(source, type, payload, len);
@@ -121,8 +146,12 @@ void Drone::processIncommingFrame(Radio& source, const uint8_t type, const uint8
         uint16_t channels[16];
 
         unpackRCChannels(payload, channels);
+        rawThrottleChannels[0] = channels[THROTTLE_N_CHANNEL];
+        rawThrottleChannels[1] = channels[THROTTLE_E_CHANNEL];
+        rawThrottleChannels[2] = channels[THROTTLE_S_CHANNEL];
+        rawThrottleChannels[3] = channels[THROTTLE_W_CHANNEL];
 
-        BitFlags flags = decodeControlFlags(channels[0]);
+        BitFlags flags = decodeControlFlags(channels[COMMAND_FLAG_CHANNEL]);
         printIncomingCRSF(sourceName, sourceDtMS, type, payload, len, channels, false);
 
         switch (flags.id){
@@ -146,10 +175,10 @@ void Drone::processIncommingFrame(Radio& source, const uint8_t type, const uint8
                 break;
             }
             
-            armN.setThrottle(channelToFloat(channels[1]));
-            armE.setThrottle(channelToFloat(channels[2]));
-            armS.setThrottle(channelToFloat(channels[3]));
-            armW.setThrottle(channelToFloat(channels[4]));
+            armN.setThrottle(channelToFloat(channels[THROTTLE_N_CHANNEL]));
+            armE.setThrottle(channelToFloat(channels[THROTTLE_E_CHANNEL]));
+            armS.setThrottle(channelToFloat(channels[THROTTLE_S_CHANNEL]));
+            armW.setThrottle(channelToFloat(channels[THROTTLE_W_CHANNEL]));
 
             break;
         /*
@@ -181,88 +210,31 @@ void Drone::processIncommingFrame(Radio& source, const uint8_t type, const uint8
 }
 
 void Drone::sendTelemetry() {
-    uint16_t values[16] = {0};
+    // The current ELRS configuration reliably carries complete CRSF frames
+    // through 20 bytes. primary packet sends 14 payload bytes plus address,
+    // length, CRSF type, and CRC.
+    static const size_t PAYLOAD_LENGTH = 14;
+    static_assert(PAYLOAD_LENGTH + 4 == 18, "Primary telemetry must be 18 bytes");
+    uint8_t payload[PAYLOAD_LENGTH] = {0};
+    const bool estopLockout = EStopActive &&
+        nowMS - EStopTriggerTimeMS < ESTOP_LOCKOUT_MS;
 
-    const BitFlags flags{
-        .id         = 0b100,
-        .setArm     = false,
-        .setEStop   = false,
-        .resetEStop = false,
-        .getArm     = armed,
-        .getEStop   = EStopActive
-    };
+    payload[0] = static_cast<uint8_t>(TelemetryPacketType::PRIMARY);
+    payload[1] = (armed ? 0x01 : 0x00) |
+                 (estopLockout ? 0x02 : 0x00) |
+                 (EStopActive ? 0x04 : 0x00);
+    writeU16BE(&payload[2], rpmToMilliRPM(armN.getRPM()));
+    writeU16BE(&payload[4], rpmToMilliRPM(armE.getRPM()));
+    writeU16BE(&payload[6], rpmToMilliRPM(armS.getRPM()));
+    writeU16BE(&payload[8], rpmToMilliRPM(armW.getRPM()));
+    writeU32BE(&payload[10], nowMS);
 
-    values[0] = packBitFlags(flags);
-
-    values[1] = floatToChannel(armN.getRPM());
-    values[2] = floatToChannel(armE.getRPM());
-    values[3] = floatToChannel(armS.getRPM());
-    values[4] = floatToChannel(armW.getRPM());
-
-    values[5] = floatToChannel(armN.getThrottle());
-    values[6] = floatToChannel(armE.getThrottle());
-    values[7] = floatToChannel(armS.getThrottle());
-    values[8] = floatToChannel(armW.getThrottle());
-
-    values[9] = static_cast<uint16_t>((ESTOP_LOCKOUT_MS + EStopTriggerTimeMS - nowMS) / 100U);
-
-    uint32_t end = EStopTriggerTimeMS + ESTOP_LOCKOUT_MS;
-
-    values[9] = (nowMS < end) ? static_cast<uint16_t>(min((end - nowMS) / 100U, 2047U)) : 0;
-
-    values[14] = static_cast<uint16_t>(nowMS & 0x7FF);
-    values[15] = static_cast<uint16_t>((nowMS >> 11) & 0x7FF);
-
-    uint8_t payload[22];
-
-    packRCChannels(values, payload);
-
-    printDebugTelemetry(values);
-    uartRadio.send(DestType::GROUND_STATION, 0x16, payload, 22);
-
-    //TODO: send imu data
-}
-
-void Drone::printDebugTelemetry(const uint16_t values[16]) {
-    if (DEBUG_RAW_CRSF_CHANNELS) {
-        debugSerial.print("[DEBUG] CRSF_CHANNELS [");
-
-        for (uint8_t i = 0; i < 16; ++i) {
-            if (i > 0) {
-                debugSerial.print(", ");
-            }
-            debugSerial.print(values[i]);
-        }
-
-        debugSerial.println("]");
-        return;
-    }
-
-    const BitFlags flags = unpackBitFlags(values[0]);
-    const uint32_t uptimeMS =
-        (static_cast<uint32_t>(values[15]) << 11) | values[14];
-
-    debugSerial.print("[DEBUG] armed=");
-    debugSerial.print(flags.getArm ? "true" : "false");
-    debugSerial.print(" estop=");
-    debugSerial.print(flags.getEStop ? "true" : "false");
-    debugSerial.print(" lockout_ms=");
-    debugSerial.print(static_cast<uint32_t>(values[9]) * 100U);
-
-    debugSerial.print(" rpm=[");
-    for (uint8_t i = 1; i <= 4; ++i) {
-        if (i > 1) debugSerial.print(",");
-        debugSerial.print(values[i]);
-    }
-
-    debugSerial.print("] throttle=[");
-    for (uint8_t i = 5; i <= 8; ++i) {
-        if (i > 5) debugSerial.print(",");
-        debugSerial.print(values[i]);
-    }
-
-    debugSerial.print("] uptime_ms=");
-    debugSerial.println(uptimeMS);
+    uartRadio.send(
+        DestType::GROUND_STATION,
+        PayloadType::FLIGHT_MODE,
+        payload,
+        sizeof(payload)
+    );
 }
 
 void Drone::main()
@@ -270,7 +242,7 @@ void Drone::main()
     while(true){
         nowMS = millis();
 
-        if (nowMS - lastSentTelemetry > TELEMETRY_DELAY) {
+        if (nowMS - lastSentTelemetry >= TELEMETRY_DELAY) {
             lastSentTelemetry = nowMS;
             sendTelemetry();
         }
@@ -285,6 +257,8 @@ void Drone::main()
         if (armN.isStalled() || armE.isStalled() || armS.isStalled() || armW.isStalled()){
             triggerEStop("stall");
         }
+
+        statusLed.update(getLedStatus());
     }
 }
 
@@ -298,6 +272,23 @@ void Drone::triggerEStop(const char* reason){
     armE.stop();
     armS.stop();
     armW.stop();
+}
+
+LedStatus Drone::getLedStatus() const {
+    if (EStopActive && nowMS - EStopTriggerTimeMS < ESTOP_LOCKOUT_MS) {
+        return LedStatus::Lockout;
+    }
+
+    if (!armed) {
+        return EStopTriggerTimeMS != 0 ? LedStatus::LockoutExitedUnarmed : LedStatus::Disarmed;
+    }
+
+    return isThrottleActive() ? LedStatus::ThrottleActive : LedStatus::Armed;
+}
+
+bool Drone::isThrottleActive() const {
+    return armN.getThrottle() > 0.0f || armE.getThrottle() > 0.0f ||
+           armS.getThrottle() > 0.0f || armW.getThrottle() > 0.0f;
 }
 
 void Drone::printEStopReason(const char* reason) {
@@ -345,10 +336,10 @@ void Drone::printIncomingCRSF(const char* sourceName, const uint32_t sourceDtMS,
     debugSerial.print(ignored ? "true" : "false");
 
     if (channels != nullptr) {
-        const BitFlags flags = decodeControlFlags(channels[0]);
+        const BitFlags flags = decodeControlFlags(channels[COMMAND_FLAG_CHANNEL]);
 
         debugSerial.print(" flags_raw=");
-        debugSerial.print(channels[0]);
+        debugSerial.print(channels[COMMAND_FLAG_CHANNEL]);
         debugSerial.print(" id=");
         debugSerial.print(flags.id);
         debugSerial.print(" setArm=");

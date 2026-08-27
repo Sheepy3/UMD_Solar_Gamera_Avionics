@@ -4,6 +4,7 @@
 #include <Arduino.h>
 #include <Adafruit_BNO08x.h>
 #include "ArmController.h"
+#include "LedController.h"
 #include "Radio.h"
 #include "util.h"
 
@@ -25,7 +26,12 @@ enum PayloadType : uint8_t {
     RC_CHANNELS_PACKED = 0x16,
     BATTERY_SENSOR = 0x08,
     ALTITUDE = 0x1E,
-    LINK_STATISTICS = 0x14
+    LINK_STATISTICS = 0x14,
+    FLIGHT_MODE = 0x21
+};
+
+enum class TelemetryPacketType : uint8_t {
+    PRIMARY = 0x01
 };
 
 struct DroneParams{
@@ -40,6 +46,8 @@ struct DroneParams{
     
     int armWPWMPin;
     int armWHallPin;
+
+    int statusLedPin;
 
     SerialUSB& serialParam;
     
@@ -56,6 +64,7 @@ public:
     ArmController armE;
     ArmController armS;
     ArmController armW;
+    LedController statusLed;
 
     Radio usbRadio;
     Radio uartRadio;
@@ -77,20 +86,23 @@ private:
 
     uint32_t lastUSBRecieveTimeMS = 0;
     uint32_t lastUARTRecieveTimeMS = 0;
+    uint16_t rawThrottleChannels[4] = {0, 0, 0, 0};
     
-    static const uint8_t TELEMETRY_FREQUENCY = 10;
+
+    static const uint8_t TELEMETRY_FREQUENCY = 12; //Hz - 12 found to be highest possible at 1:4 ratio on 250Hz packet rate.
     static const uint32_t TELEMETRY_DELAY = 1000L / TELEMETRY_FREQUENCY;
     static const uint32_t TIMEOUT_MS = 1000L;
     static const uint32_t ESTOP_LOCKOUT_MS = 10000L;
 
     uint32_t lastSentTelemetry = 0;
     uint32_t lastIncomingCRSFLogTimeMS = 0;
-    
+
     void sendTelemetry();
-    void printDebugTelemetry(const uint16_t values[16]);
     void printEStopReason(const char* reason);
     void printIncomingCRSF(const char* sourceName, const uint32_t sourceDtMS, const uint8_t type, const uint8_t* payload, const uint8_t len, const uint16_t* channels, bool ignored);
     void printHexByte(uint8_t value);
+    LedStatus getLedStatus() const;
+    bool isThrottleActive() const;
 
     void processIncommingFrame(Radio& source, const uint8_t type, const uint8_t* payload, const uint8_t len);
 };

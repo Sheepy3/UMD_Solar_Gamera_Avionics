@@ -87,9 +87,19 @@ inline void packRCChannels(const uint16_t *values, uint8_t payload[22])
 }
 
 inline float channelToFloat(uint16_t value) {
-    uint16_t maskedValue = value & 0x07FF;
-    
-    return static_cast<float>(maskedValue) / 2047.0f;
+    static constexpr uint16_t CRSF_CHANNEL_MIN = 172;
+    static constexpr uint16_t CRSF_CHANNEL_MAX = 1811;
+
+    const uint16_t maskedValue = value & 0x07FF;
+    if (maskedValue <= CRSF_CHANNEL_MIN) {
+        return 0.0f;
+    }
+    if (maskedValue >= CRSF_CHANNEL_MAX) {
+        return 1.0f;
+    }
+
+    return static_cast<float>(maskedValue - CRSF_CHANNEL_MIN) /
+        static_cast<float>(CRSF_CHANNEL_MAX - CRSF_CHANNEL_MIN);
 }
 
 inline uint16_t floatToChannel(float value) {
