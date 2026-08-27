@@ -18,20 +18,35 @@ TITLE_COLUMN_WIDTH = 220
 ARM_CARD_HEIGHT = 190
 TOGGLE_HEIGHT = 100
 VALUE_ROW_HEIGHT = 40
-ESTOP_ROW_HEIGHT = 80
+ESTOP_ROW_HEIGHT = 200
+ESTOP_RESET_ROW_HEIGHT = 100
 UI_GUTTER = 9
+# Vertical gaps between consecutive rows in the side control stack. These are
+# passed directly to Dear PyGui, so negative values are valid when needed.
+THROTTLE_LIMIT_ROW_GAP = 9
+THROTTLE_SET_ROW_GAP = -11
+THROTTLE_TO_ARM_ROW_GAP = -11
+ARM_TO_ESTOP_ROW_GAP = 9
+
+# Graph-only margins. Unlike body-table padding, these do not affect the
+# side-control panel.
+GRAPH_SECTION_TOP_MARGIN = UI_GUTTER
+GRAPH_SECTION_BOTTOM_MARGIN = 5
+# Visible gaps between adjacent plots in the 2 × 2 graph grid.
+GRAPH_COLUMN_GUTTER = UI_GUTTER
+GRAPH_ROW_GUTTER = UI_GUTTER
+
+THROTTLE_CONTROL_ROW_HEIGHT = 70
+INTEGER_INPUT_VERTICAL_PADDING = 24
 # The action row absorbs Dear PyGui's three pixels of trailing table padding so
 # its visible bottom gutter matches UI_GUTTER.
-START_BUTTON_HEIGHT = 53
+START_BUTTON_HEIGHT = 80
 OUTPUT_BUTTON_HEIGHT = START_BUTTON_HEIGHT
 MIN_PLOT_HEIGHT = 160
 # Space used above/below the plots by the header, action row, and padding.
-# The E-stop row now lives beside the plots rather than above them.
 # Includes the fixed header/action rows, table spacing, and the main window's
 # bottom padding so the content fits without creating a vertical scrollbar.
-LAYOUT_VERTICAL_OVERHEAD = 299
-# Status readouts, two control rows, and their spacing share the plot-grid height.
-CONTROL_COLUMN_FIXED_HEIGHT = ESTOP_ROW_HEIGHT * 2 + 107
+LAYOUT_VERTICAL_OVERHEAD = 294
 
 
 class ArmCard:
@@ -236,6 +251,7 @@ def create_fonts():
     with dpg.font_registry():
         fonts = {
             "title": dpg.add_font(font_path, 30),
+            "lock": dpg.add_font(font_path, 12),
             "small": dpg.add_font(font_path, 18),
             "medium": dpg.add_font(font_path, 23),
             "estop": dpg.add_font(font_path, 34),
@@ -271,6 +287,10 @@ def theme_stop_button():
 
     dpg.bind_item_theme("stop_button", button_theme)
     dpg.bind_item_theme("start_button", button_theme)
+    dpg.bind_item_theme("max_throttle_button", button_theme)
+    dpg.bind_item_theme("min_throttle_button", button_theme)
+    dpg.bind_item_theme("set_velocity_button", button_theme)
+    dpg.bind_item_theme("set_throttle_button", button_theme)
 
     with dpg.theme() as button_theme2:
         with dpg.theme_component(dpg.mvButton):
@@ -280,7 +300,31 @@ def theme_stop_button():
 
     dpg.bind_item_theme("e_stop_button", button_theme2)
     dpg.bind_item_theme("arm_button", button_theme2)
+    dpg.bind_item_theme("throttle_lock_button", button_theme2)
     dpg.bind_item_theme("choose_output_button", button_theme2)
+
+    with dpg.theme() as integer_input_theme:
+        with dpg.theme_component(dpg.mvAll):
+            dpg.add_theme_style(
+                dpg.mvStyleVar_FramePadding,
+                4,
+                INTEGER_INPUT_VERTICAL_PADDING,
+            )
+
+    dpg.bind_item_theme("throttle_velocity_input", integer_input_theme)
+    dpg.bind_item_theme("throttle_input", integer_input_theme)
+
+    row_gap_settings = (
+        ("throttle_limit_row", THROTTLE_LIMIT_ROW_GAP),
+        ("velocity_control_row", THROTTLE_SET_ROW_GAP),
+        ("throttle_control_row", THROTTLE_TO_ARM_ROW_GAP),
+        ("control_button_row", ARM_TO_ESTOP_ROW_GAP),
+    )
+    for row_tag, row_gap in row_gap_settings:
+        with dpg.theme() as row_gap_theme:
+            with dpg.theme_component(dpg.mvTable):
+                dpg.add_theme_style(dpg.mvStyleVar_ItemSpacing, 8, row_gap)
+        dpg.bind_item_theme(row_tag, row_gap_theme)
 
     with dpg.theme() as control_spacing_theme:
         with dpg.theme_component(dpg.mvGroup):
@@ -292,12 +336,30 @@ def theme_stop_button():
 
     dpg.bind_item_theme("control_button_stack", control_spacing_theme)
 
+    with dpg.theme() as graph_section_theme:
+        with dpg.theme_component(dpg.mvGroup):
+            dpg.add_theme_style(dpg.mvStyleVar_ItemSpacing, 0, 0)
+
+    dpg.bind_item_theme("graph_section", graph_section_theme)
+
+    with dpg.theme() as plot_grid_theme:
+        with dpg.theme_component(dpg.mvTable):
+            # Table padding is applied to both adjacent cells, so each side
+            # receives half of the desired visible gutter.
+            dpg.add_theme_style(
+                dpg.mvStyleVar_CellPadding,
+                GRAPH_COLUMN_GUTTER / 2,
+                GRAPH_ROW_GUTTER / 2,
+            )
+
+    dpg.bind_item_theme("plot_grid", plot_grid_theme)
+
     with dpg.theme() as body_spacing_theme:
         with dpg.theme_component(dpg.mvTable):
             dpg.add_theme_style(
                 dpg.mvStyleVar_CellPadding,
                 4,
-                UI_GUTTER / 2,
+                0,
             )
 
     dpg.bind_item_theme("body_layout", body_spacing_theme)
@@ -359,19 +421,20 @@ def update_responsive_layout(sender=None, app_data=None, user_data=None):
     viewport_height = dpg.get_viewport_client_height()
     plot_height = max(
         MIN_PLOT_HEIGHT,
-        (viewport_height - LAYOUT_VERTICAL_OVERHEAD) // 2,
+        (
+            viewport_height
+            - LAYOUT_VERTICAL_OVERHEAD
+            - GRAPH_SECTION_TOP_MARGIN
+            - GRAPH_SECTION_BOTTOM_MARGIN
+            # The graph table applies vertical cell padding above, between,
+            # and below its two plot rows.
+            - GRAPH_ROW_GUTTER * 2
+        )
+        // 2,
     )
 
     for arm_id, *_ in ARM_SPECS:
         dpg.configure_item(f"plot_{arm_id}", height=plot_height)
-
-    dpg.configure_item(
-        "control_spacer",
-        height=max(
-            0,
-            plot_height * 2 + 8 - CONTROL_COLUMN_FIXED_HEIGHT,
-        ),
-    )
 
     # The viewport callback runs before Dear ImGui lays out the resized table.
     # Redraw on the following frame, when each card's rendered width is final.
@@ -388,9 +451,12 @@ def refresh_arm_card_layout(sender=None, app_data=None, user_data=None):
 
 
 def main():
-    global start
+    global start, throttle_locked, throttle_percent, throttle_velocity
 
     start = False
+    throttle_locked = False
+    throttle_percent = 0
+    throttle_velocity = 0
     arm_cards.clear()
 
     dpg.create_context()
@@ -398,6 +464,7 @@ def main():
         title="Solar Gamera",
         width=DEFAULT_VIEWPORT_WIDTH,
         height=DEFAULT_VIEWPORT_HEIGHT,
+        min_height=850,
     )
     dpg.setup_dearpygui()
 
@@ -474,11 +541,124 @@ def main():
                     dpg.add_text(RSSI_val(), tag="RSSI_text")
                     dpg.add_text(LQ_val(), tag="LQ_text")
                     dpg.add_text(SNR_val(), tag="SNR_text")
-                    dpg.add_spacer(
-                        tag="control_spacer",
-                        height=MIN_PLOT_HEIGHT,
-                    )
                     with dpg.group(tag="control_button_stack"):
+                        with dpg.table(
+                            tag="throttle_limit_row",
+                            header_row=False,
+                            policy=dpg.mvTable_SizingStretchProp,
+                            width=-1,
+                            no_pad_outerX=True,
+                        ):
+                            dpg.add_table_column(
+                                width_stretch=True,
+                                init_width_or_weight=1.0,
+                            )
+                            dpg.add_table_column(
+                                width_stretch=True,
+                                init_width_or_weight=2.5,
+                            )
+                            dpg.add_table_column(
+                                width_stretch=True,
+                                init_width_or_weight=2.5,
+                            )
+                            with dpg.table_row():
+                                with dpg.table_cell():
+                                    dpg.add_button(
+                                        label="UNLOCKED",
+                                        tag="throttle_lock_button",
+                                        callback=toggle_throttle_lock,
+                                        width=-1,
+                                        height=THROTTLE_CONTROL_ROW_HEIGHT,
+                                    )
+                                with dpg.table_cell():
+                                    dpg.add_button(
+                                        label="Throttle: Max",
+                                        tag="max_throttle_button",
+                                        callback=set_max_throttle,
+                                        width=-1,
+                                        height=THROTTLE_CONTROL_ROW_HEIGHT,
+                                    )
+                                with dpg.table_cell():
+                                    dpg.add_button(
+                                        label="Throttle: Min",
+                                        tag="min_throttle_button",
+                                        callback=set_min_throttle,
+                                        width=-1,
+                                        height=THROTTLE_CONTROL_ROW_HEIGHT,
+                                    )
+
+                        with dpg.table(
+                            tag="velocity_control_row",
+                            header_row=False,
+                            policy=dpg.mvTable_SizingStretchProp,
+                            width=-1,
+                            no_pad_outerX=True,
+                        ):
+                            dpg.add_table_column(
+                                width_stretch=True,
+                                init_width_or_weight=1.0,
+                            )
+                            dpg.add_table_column(
+                                width_stretch=True,
+                                init_width_or_weight=4.0,
+                            )
+                            with dpg.table_row():
+                                with dpg.table_cell():
+                                    dpg.add_input_int(
+                                        tag="throttle_velocity_input",
+                                        default_value=0,
+                                        min_value=0,
+                                        min_clamped=True,
+                                        step=0,
+                                        step_fast=0,
+                                        width=-1,
+                                    )
+                                with dpg.table_cell():
+                                    dpg.add_button(
+                                        label="Set Throttle Velocity\n(%/s, 0 = instant)",
+                                        tag="set_velocity_button",
+                                        callback=set_throttle_velocity,
+                                        width=-1,
+                                        height=THROTTLE_CONTROL_ROW_HEIGHT,
+                                    )
+
+                        with dpg.table(
+                            tag="throttle_control_row",
+                            header_row=False,
+                            policy=dpg.mvTable_SizingStretchProp,
+                            width=-1,
+                            no_pad_outerX=True,
+                        ):
+                            dpg.add_table_column(
+                                width_stretch=True,
+                                init_width_or_weight=1.0,
+                            )
+                            dpg.add_table_column(
+                                width_stretch=True,
+                                init_width_or_weight=4.0,
+                            )
+                            with dpg.table_row():
+                                with dpg.table_cell():
+                                    dpg.add_input_int(
+                                        tag="throttle_input",
+                                        default_value=0,
+                                        min_value=0,
+                                        max_value=100,
+                                        min_clamped=True,
+                                        max_clamped=True,
+                                        step=0,
+                                        step_fast=0,
+                                        width=-1,
+                                    )
+                                with dpg.table_cell():
+                                    dpg.add_button(
+                                        label="Set Throttle (%)",
+                                        tag="set_throttle_button",
+                                        callback=set_throttle,
+                                        width=-1,
+                                        height=THROTTLE_CONTROL_ROW_HEIGHT,
+                                    )
+
                         with dpg.table(
                             tag="control_button_row",
                             header_row=False,
@@ -495,7 +675,7 @@ def main():
                                         tag="arm_button",
                                         callback=arm_button_fun,
                                         width=-1,
-                                        height=ESTOP_ROW_HEIGHT,
+                                        height=ESTOP_RESET_ROW_HEIGHT,
                                     )
                                 with dpg.table_cell():
                                     dpg.add_button(
@@ -503,7 +683,7 @@ def main():
                                         tag="e_stop_button",
                                         callback=estop,
                                         width=-1,
-                                        height=ESTOP_ROW_HEIGHT,
+                                        height=ESTOP_RESET_ROW_HEIGHT,
                                     )
                         dpg.add_button(
                             label="EMERGENCY STOP",
@@ -514,25 +694,28 @@ def main():
                         )
 
                 with dpg.table_cell():
-                    with dpg.table(
-                        tag="plot_grid",
-                        header_row=False,
-                        policy=dpg.mvTable_SizingStretchSame,
-                        width=-1,
-                        no_pad_outerX=True,
-                    ):
-                        dpg.add_table_column(width_stretch=True)
-                        dpg.add_table_column(width_stretch=True)
+                    with dpg.group(tag="graph_section"):
+                        dpg.add_spacer(height=GRAPH_SECTION_TOP_MARGIN)
+                        with dpg.table(
+                            tag="plot_grid",
+                            header_row=False,
+                            policy=dpg.mvTable_SizingStretchSame,
+                            width=-1,
+                            no_pad_outerX=True,
+                        ):
+                            dpg.add_table_column(width_stretch=True)
+                            dpg.add_table_column(width_stretch=True)
 
-                        plot_specs = (
-                            (("n", "N"), ("s", "S")),
-                            (("e", "E"), ("w", "W")),
-                        )
-                        for plot_row in plot_specs:
-                            with dpg.table_row():
-                                for arm_id, label in plot_row:
-                                    with dpg.table_cell():
-                                        add_arm_plot(arm_id, label)
+                            plot_specs = (
+                                (("n", "N"), ("s", "S")),
+                                (("e", "E"), ("w", "W")),
+                            )
+                            for plot_row in plot_specs:
+                                with dpg.table_row():
+                                    for arm_id, label in plot_row:
+                                        with dpg.table_cell():
+                                            add_arm_plot(arm_id, label)
+                        dpg.add_spacer(height=GRAPH_SECTION_BOTTOM_MARGIN)
 
             with dpg.table_row():
                 with dpg.table_cell():
@@ -557,6 +740,13 @@ def main():
     apply_font("stop_button", fonts["estop"])
     apply_font("e_stop_button", fonts["medium"])
     apply_font("arm_button", fonts["medium"])
+    apply_font("throttle_lock_button", fonts["lock"])
+    apply_font("max_throttle_button", fonts["medium"])
+    apply_font("min_throttle_button", fonts["medium"])
+    apply_font("set_velocity_button", fonts["medium"])
+    apply_font("set_throttle_button", fonts["medium"])
+    apply_font("throttle_velocity_input", fonts["medium"])
+    apply_font("throttle_input", fonts["medium"])
     apply_font("RSSI_text", fonts["medium"])
     apply_font("LQ_text", fonts["medium"])
     apply_font("SNR_text", fonts["medium"])
@@ -581,6 +771,9 @@ def open_save_dialog(sender, app_data):
     dpg.show_item("save_file_dialog")
 
 output_file_path = ""
+throttle_locked = False
+throttle_percent = 0
+throttle_velocity = 0
 
 def save_file_callback(sender, app_data):
     global output_file_path
@@ -599,6 +792,47 @@ def estop():
 
 def arm_button_fun():
     print("Arm pressed")
+
+
+def toggle_throttle_lock():
+    """Enable or disable the Max and Min throttle shortcuts."""
+    global throttle_locked
+    throttle_locked = not throttle_locked
+    dpg.configure_item(
+        "throttle_lock_button",
+        label="LOCKED" if throttle_locked else "UNLOCKED",
+    )
+    dpg.configure_item("max_throttle_button", enabled=not throttle_locked)
+    dpg.configure_item("min_throttle_button", enabled=not throttle_locked)
+
+
+def set_max_throttle():
+    if throttle_locked:
+        return
+    set_throttle_value(100)
+
+
+def set_min_throttle():
+    if throttle_locked:
+        return
+    set_throttle_value(0)
+
+
+def set_throttle_velocity():
+    global throttle_velocity
+    throttle_velocity = dpg.get_value("throttle_velocity_input")
+    print(f"Throttle velocity set to {throttle_velocity}%/s")
+
+
+def set_throttle():
+    set_throttle_value(dpg.get_value("throttle_input"))
+
+
+def set_throttle_value(value):
+    global throttle_percent
+    throttle_percent = max(0, min(100, int(value)))
+    dpg.set_value("throttle_input", throttle_percent)
+    print(f"Throttle set to {throttle_percent}%")
 
 def RSSI_val():
     val = 5
