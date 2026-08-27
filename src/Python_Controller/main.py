@@ -19,10 +19,12 @@ ARM_CARD_HEIGHT = 190
 TOGGLE_HEIGHT = 100
 VALUE_ROW_HEIGHT = 40
 ESTOP_ROW_HEIGHT = 80
-OUTPUT_BUTTON_HEIGHT = 30
 START_BUTTON_HEIGHT = 50
+OUTPUT_BUTTON_HEIGHT = START_BUTTON_HEIGHT
 MIN_PLOT_HEIGHT = 160
-LAYOUT_VERTICAL_OVERHEAD = 435
+# Includes the fixed header/action rows, table spacing, and the main window's
+# bottom padding so the content fits without creating a vertical scrollbar.
+LAYOUT_VERTICAL_OVERHEAD = 378
 
 
 class ArmCard:
@@ -395,7 +397,11 @@ def main():
         dpg.add_file_extension(".txt")
         dpg.add_file_extension(".csv")
 
-    with dpg.window(tag="main_window"):
+    with dpg.window(
+        tag="main_window",
+        no_scrollbar=True,
+        no_scroll_with_mouse=True,
+    ):
         # Header: a fixed title column and four equally stretchable arm cards.
         with dpg.table(
             tag="header_layout",
@@ -432,13 +438,13 @@ def main():
                         card.build(card_cell)
                         arm_cards[arm_id] = card
 
-        # Body: the sidebar and dashboard expand in proportion to one another.
+        # Body: corresponding sidebar and dashboard controls share table rows,
+        # so their vertical alignment is handled directly by the layout.
         with dpg.table(
             tag="body_layout",
             header_row=False,
             policy=dpg.mvTable_SizingStretchProp,
             width=-1,
-            height=-1,
             no_pad_outerX=True,
         ):
             dpg.add_table_column(width_stretch=True, init_width_or_weight=1.0)
@@ -446,101 +452,96 @@ def main():
 
             with dpg.table_row():
                 with dpg.table_cell():
-                    with dpg.child_window(
-                        tag="control_sidebar",
-                        width=-1,
-                        height=-1,
-                        border=False,
-                    ):
-                        dpg.add_text(RSSI_val(), tag="RSSI_text")
-                        dpg.add_text(LQ_val(), tag="LQ_text")
-                        dpg.add_text(SNR_val(), tag="SNR_text")
-                        dpg.add_spacer(height=8)
-                        dpg.add_slider_float(
-                            tag="power_slider",
-                            default_value=0,
-                            min_value=0,
-                            max_value=100,
-                            vertical=True,
-                            width=-1,
-                            height=MIN_PLOT_HEIGHT,
-                            callback=power_slider_fun,
-                        )
-                        dpg.add_button(
-                            label="Start",
-                            tag="start_button",
-                            width=-1,
-                            height=START_BUTTON_HEIGHT,
-                            callback=start_button_fun,
-                        )
+                    dpg.add_text(RSSI_val(), tag="RSSI_text")
+                    dpg.add_text(LQ_val(), tag="LQ_text")
+                    dpg.add_text(SNR_val(), tag="SNR_text")
 
                 with dpg.table_cell():
-                    with dpg.child_window(
-                        tag="dashboard",
+                    with dpg.table(
+                        tag="estop_layout",
+                        header_row=False,
+                        policy=dpg.mvTable_SizingStretchProp,
                         width=-1,
-                        height=-1,
-                        border=False,
+                        no_pad_outerX=True,
                     ):
-                        with dpg.table(
-                            tag="estop_layout",
-                            header_row=False,
-                            policy=dpg.mvTable_SizingStretchProp,
-                            width=-1,
-                            no_pad_outerX=True,
-                        ):
-                            dpg.add_table_column(
-                                width_stretch=True,
-                                init_width_or_weight=4.0,
-                            )
-                            dpg.add_table_column(
-                                width_stretch=True,
-                                init_width_or_weight=1.0,
-                            )
-                            with dpg.table_row():
-                                with dpg.table_cell():
-                                    dpg.add_button(
-                                        label="EMERGENCY STOP",
-                                        tag="stop_button",
-                                        callback=Emerstop,
-                                        width=-1,
-                                        height=ESTOP_ROW_HEIGHT,
-                                    )
-                                with dpg.table_cell():
-                                    dpg.add_button(
-                                        label="E-STOP Reset",
-                                        tag="e_stop_button",
-                                        callback=estop,
-                                        width=-1,
-                                        height=ESTOP_ROW_HEIGHT,
-                                    )
-
-                        with dpg.table(
-                            tag="plot_grid",
-                            header_row=False,
-                            policy=dpg.mvTable_SizingStretchSame,
-                            width=-1,
-                            no_pad_outerX=True,
-                        ):
-                            dpg.add_table_column(width_stretch=True)
-                            dpg.add_table_column(width_stretch=True)
-
-                            plot_specs = (
-                                (("n", "N"), ("s", "S")),
-                                (("e", "E"), ("w", "W")),
-                            )
-                            for plot_row in plot_specs:
-                                with dpg.table_row():
-                                    for arm_id, label in plot_row:
-                                        with dpg.table_cell():
-                                            add_arm_plot(arm_id, label)
-
-                        dpg.add_button(
-                            label="Choose Output File",
-                            tag="choose_output_button",
-                            width=-1,
-                            height=OUTPUT_BUTTON_HEIGHT,
-                            callback=open_save_dialog,
+                        dpg.add_table_column(
+                            width_stretch=True,
+                            init_width_or_weight=4.0,
                         )
+                        dpg.add_table_column(
+                            width_stretch=True,
+                            init_width_or_weight=1.0,
+                        )
+                        with dpg.table_row():
+                            with dpg.table_cell():
+                                dpg.add_button(
+                                    label="EMERGENCY STOP",
+                                    tag="stop_button",
+                                    callback=Emerstop,
+                                    width=-1,
+                                    height=ESTOP_ROW_HEIGHT,
+                                )
+                            with dpg.table_cell():
+                                dpg.add_button(
+                                    label="E-STOP Reset",
+                                    tag="e_stop_button",
+                                    callback=estop,
+                                    width=-1,
+                                    height=ESTOP_ROW_HEIGHT,
+                                )
+
+            with dpg.table_row():
+                with dpg.table_cell():
+                    dpg.add_slider_float(
+                        tag="power_slider",
+                        default_value=0,
+                        min_value=0,
+                        max_value=100,
+                        vertical=True,
+                        width=-1,
+                        height=MIN_PLOT_HEIGHT,
+                        callback=power_slider_fun,
+                    )
+
+                with dpg.table_cell():
+                    with dpg.table(
+                        tag="plot_grid",
+                        header_row=False,
+                        policy=dpg.mvTable_SizingStretchSame,
+                        width=-1,
+                        no_pad_outerX=True,
+                    ):
+                        dpg.add_table_column(width_stretch=True)
+                        dpg.add_table_column(width_stretch=True)
+
+                        plot_specs = (
+                            (("n", "N"), ("s", "S")),
+                            (("e", "E"), ("w", "W")),
+                        )
+                        for plot_row in plot_specs:
+                            with dpg.table_row():
+                                for arm_id, label in plot_row:
+                                    with dpg.table_cell():
+                                        add_arm_plot(arm_id, label)
+
+            with dpg.table_row():
+                with dpg.table_cell():
+                    dpg.add_button(
+                        label="Start",
+                        tag="start_button",
+                        width=-1,
+                        height=START_BUTTON_HEIGHT,
+                        callback=start_button_fun,
+                    )
+
+                with dpg.table_cell():
+                    dpg.add_button(
+                        label="Choose Output File",
+                        tag="choose_output_button",
+                        width=-1,
+                        height=OUTPUT_BUTTON_HEIGHT,
+                        callback=open_save_dialog,
+                    )
 
     apply_font("title_text", fonts["title"])
     apply_font("stop_button", fonts["large"])
@@ -579,7 +580,7 @@ def save_file_callback(sender, app_data):
     print("Output file path:", output_file_path)
 
 
-# Emergence Stop function
+# Emergency Stop function
 def Emerstop():
     print("EMERGENCY STOP pressed")
 
