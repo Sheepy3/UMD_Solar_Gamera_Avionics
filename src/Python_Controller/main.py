@@ -19,12 +19,19 @@ ARM_CARD_HEIGHT = 190
 TOGGLE_HEIGHT = 100
 VALUE_ROW_HEIGHT = 40
 ESTOP_ROW_HEIGHT = 80
-START_BUTTON_HEIGHT = 50
+UI_GUTTER = 9
+# The action row absorbs Dear PyGui's three pixels of trailing table padding so
+# its visible bottom gutter matches UI_GUTTER.
+START_BUTTON_HEIGHT = 53
 OUTPUT_BUTTON_HEIGHT = START_BUTTON_HEIGHT
 MIN_PLOT_HEIGHT = 160
+# Space used above/below the plots by the header, action row, and padding.
+# The E-stop row now lives beside the plots rather than above them.
 # Includes the fixed header/action rows, table spacing, and the main window's
 # bottom padding so the content fits without creating a vertical scrollbar.
-LAYOUT_VERTICAL_OVERHEAD = 378
+LAYOUT_VERTICAL_OVERHEAD = 299
+# Status readouts, two control rows, and their spacing share the plot-grid height.
+CONTROL_COLUMN_FIXED_HEIGHT = ESTOP_ROW_HEIGHT * 2 + 107
 
 
 class ArmCard:
@@ -231,7 +238,7 @@ def create_fonts():
             "title": dpg.add_font(font_path, 30),
             "small": dpg.add_font(font_path, 18),
             "medium": dpg.add_font(font_path, 23),
-            "large": dpg.add_font(font_path, 40),
+            "estop": dpg.add_font(font_path, 34),
         }
 
     return fonts
@@ -272,7 +279,28 @@ def theme_stop_button():
             dpg.add_theme_color(dpg.mvThemeCol_Text, (255, 255, 255, 255))
 
     dpg.bind_item_theme("e_stop_button", button_theme2)
+    dpg.bind_item_theme("arm_button", button_theme2)
     dpg.bind_item_theme("choose_output_button", button_theme2)
+
+    with dpg.theme() as control_spacing_theme:
+        with dpg.theme_component(dpg.mvGroup):
+            dpg.add_theme_style(
+                dpg.mvStyleVar_ItemSpacing,
+                8,
+                UI_GUTTER,
+            )
+
+    dpg.bind_item_theme("control_button_stack", control_spacing_theme)
+
+    with dpg.theme() as body_spacing_theme:
+        with dpg.theme_component(dpg.mvTable):
+            dpg.add_theme_style(
+                dpg.mvStyleVar_CellPadding,
+                4,
+                UI_GUTTER / 2,
+            )
+
+    dpg.bind_item_theme("body_layout", body_spacing_theme)
 
 def create_arm_card_themes():
     themes = {}
@@ -292,17 +320,6 @@ def create_arm_card_themes():
             dpg.add_theme_style(dpg.mvStyleVar_DisabledAlpha, 1.0)
 
     return themes
-
-def theme_power_slider():
-    with dpg.theme() as slider_theme:
-        with dpg.theme_component(dpg.mvSliderFloat):
-            dpg.add_theme_color(dpg.mvThemeCol_FrameBg, (50, 50, 50, 255))
-            dpg.add_theme_color(dpg.mvThemeCol_FrameBgActive, (60, 60, 60, 255))
-            dpg.add_theme_color(dpg.mvThemeCol_SliderGrab, (48, 81, 242, 255))
-            dpg.add_theme_color(dpg.mvThemeCol_SliderGrabActive, (255, 0, 0, 255))
-            dpg.add_theme_color(dpg.mvThemeCol_Text, (255, 255, 255, 255))
-
-    dpg.bind_item_theme("power_slider", slider_theme)
 
 #Image Upload
 """
@@ -349,8 +366,11 @@ def update_responsive_layout(sender=None, app_data=None, user_data=None):
         dpg.configure_item(f"plot_{arm_id}", height=plot_height)
 
     dpg.configure_item(
-        "power_slider",
-        height=max(MIN_PLOT_HEIGHT, plot_height * 2 + 8),
+        "control_spacer",
+        height=max(
+            0,
+            plot_height * 2 + 8 - CONTROL_COLUMN_FIXED_HEIGHT,
+        ),
     )
 
     # The viewport callback runs before Dear ImGui lays out the resized table.
@@ -368,9 +388,8 @@ def refresh_arm_card_layout(sender=None, app_data=None, user_data=None):
 
 
 def main():
-    global power_percent, start
+    global start
 
-    power_percent = 0
     start = False
     arm_cards.clear()
 
@@ -455,53 +474,44 @@ def main():
                     dpg.add_text(RSSI_val(), tag="RSSI_text")
                     dpg.add_text(LQ_val(), tag="LQ_text")
                     dpg.add_text(SNR_val(), tag="SNR_text")
-
-                with dpg.table_cell():
-                    with dpg.table(
-                        tag="estop_layout",
-                        header_row=False,
-                        policy=dpg.mvTable_SizingStretchProp,
-                        width=-1,
-                        no_pad_outerX=True,
-                    ):
-                        dpg.add_table_column(
-                            width_stretch=True,
-                            init_width_or_weight=4.0,
-                        )
-                        dpg.add_table_column(
-                            width_stretch=True,
-                            init_width_or_weight=1.0,
-                        )
-                        with dpg.table_row():
-                            with dpg.table_cell():
-                                dpg.add_button(
-                                    label="EMERGENCY STOP",
-                                    tag="stop_button",
-                                    callback=Emerstop,
-                                    width=-1,
-                                    height=ESTOP_ROW_HEIGHT,
-                                )
-                            with dpg.table_cell():
-                                dpg.add_button(
-                                    label="E-STOP Reset",
-                                    tag="e_stop_button",
-                                    callback=estop,
-                                    width=-1,
-                                    height=ESTOP_ROW_HEIGHT,
-                                )
-
-            with dpg.table_row():
-                with dpg.table_cell():
-                    dpg.add_slider_float(
-                        tag="power_slider",
-                        default_value=0,
-                        min_value=0,
-                        max_value=100,
-                        vertical=True,
-                        width=-1,
+                    dpg.add_spacer(
+                        tag="control_spacer",
                         height=MIN_PLOT_HEIGHT,
-                        callback=power_slider_fun,
                     )
+                    with dpg.group(tag="control_button_stack"):
+                        with dpg.table(
+                            tag="control_button_row",
+                            header_row=False,
+                            policy=dpg.mvTable_SizingStretchSame,
+                            width=-1,
+                            no_pad_outerX=True,
+                        ):
+                            dpg.add_table_column(width_stretch=True)
+                            dpg.add_table_column(width_stretch=True)
+                            with dpg.table_row():
+                                with dpg.table_cell():
+                                    dpg.add_button(
+                                        label="Arm",
+                                        tag="arm_button",
+                                        callback=arm_button_fun,
+                                        width=-1,
+                                        height=ESTOP_ROW_HEIGHT,
+                                    )
+                                with dpg.table_cell():
+                                    dpg.add_button(
+                                        label="E-STOP Reset",
+                                        tag="e_stop_button",
+                                        callback=estop,
+                                        width=-1,
+                                        height=ESTOP_ROW_HEIGHT,
+                                    )
+                        dpg.add_button(
+                            label="EMERGENCY STOP",
+                            tag="stop_button",
+                            callback=Emerstop,
+                            width=-1,
+                            height=ESTOP_ROW_HEIGHT,
+                        )
 
                 with dpg.table_cell():
                     with dpg.table(
@@ -544,8 +554,9 @@ def main():
                     )
 
     apply_font("title_text", fonts["title"])
-    apply_font("stop_button", fonts["large"])
+    apply_font("stop_button", fonts["estop"])
     apply_font("e_stop_button", fonts["medium"])
+    apply_font("arm_button", fonts["medium"])
     apply_font("RSSI_text", fonts["medium"])
     apply_font("LQ_text", fonts["medium"])
     apply_font("SNR_text", fonts["medium"])
@@ -553,7 +564,6 @@ def main():
 
     theme_main_window()
     theme_stop_button()
-    theme_power_slider()
     dpg.set_primary_window("main_window", True)
     dpg.set_viewport_resize_callback(update_responsive_layout)
 
@@ -587,6 +597,9 @@ def Emerstop():
 def estop():
     print("E-STOP pressed")
 
+def arm_button_fun():
+    print("Arm pressed")
+
 def RSSI_val():
     val = 5
     ouput = f"RSSI = -{val}/5dBm"
@@ -602,15 +615,10 @@ def SNR_val():
     ouput = f"LQ = {val}db"
     return ouput
 
-# Set power input
-def power_slider_fun(sender, app_data):
-    global power_percent
-    power_percent = app_data
-
 def start_button_fun():
     global start
     start = True
-    print("Ouput power percentage =", power_percent)
+    print("Start pressed")
 
 
 if __name__ == "__main__":
